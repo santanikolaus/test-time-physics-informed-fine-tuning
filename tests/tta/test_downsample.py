@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from scripts.materialize_res256 import resample_part
+from src.solver.downsample import resample_part
 
 
 def _part_single_mode(S, kx, ky, T=5):
