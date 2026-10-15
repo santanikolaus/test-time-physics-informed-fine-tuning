@@ -1,13 +1,13 @@
 """Stack per-chain GT part files into one KFDataset-layout file.
 
-generate_pilot.py writes resumable per-chain parts (T+1,S,S) into --outdir;
+generate_trajectories.py writes resumable per-chain parts (T+1,S,S) into --outdir;
 KFDataset needs a single stacked file (N,T+1,S,S). This concatenates the parts
 in chain order via a memmap (no full set held in RAM). No resampling — parts are
 written at their native resolution. For a 512^2 -> 256^2 downsample use
-scripts/materialize_res256.py instead.
+downsample.py instead.
 
 Run (server):
-    PYTHONPATH=$PWD python scripts/stack_parts.py --re 100 --res 256
+    python -m src.solver.stack_parts --re 100 --res 256
 """
 import argparse
 from pathlib import Path
@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-_ROOT = Path(__file__).parent.parent
+_ROOT = Path(__file__).parents[2]
 DATA_ROOT = Path(yaml.safe_load((_ROOT / "msc" / "configs" / "paths.yaml").read_text())["data"]["ns"])
 
 

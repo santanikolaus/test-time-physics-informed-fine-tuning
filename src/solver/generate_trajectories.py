@@ -1,32 +1,15 @@
 #!/usr/bin/env python
-"""Resolution pilot — regenerate Kolmogorov GT at higher spatial resolution.
+"""Generate independent Kolmogorov-flow trajectories.
 
-Purpose (the GATE, operator-free): the Re500 residual objective failed because
-GT@128^2 is under-resolved (k_pal(500)~72 > 2/3-dealias band 43). Before
-committing to an Option-B rebuild we test the *data* claim only:
+Each trajectory draws its own initial condition from the Gaussian random field
+(alpha=2.5, tau=3.0, seed = --seed + index), burns in for --burnin time units at
+the given Re, then records t_res + 1 frames over t in [0, 1]. NavierStokes2d,
+f = -4cos(4y), float64.
 
-  1. does E(k) develop a clean Nyquist roll-off and CONVERGE (res vs finer ref)?
-  2. does the GT *diagonal* residual SPATIAL floor collapse toward the temporal
-     floor (the way Re<=300 behaves at 128^2: 0.008-0.065)?
-
-No operator, no training, no Re100/200/300 needed for this gate — these are
-properties of the freshly generated GT field alone.
-
-t_res is held at 128 (dt=1/128, identical to the existing data) so any drop in
-the residual floor is attributable to SPATIAL resolution, not a changed dt.
-
-Same solver/forcing/IC family as the original data (NavierStokes2d, 2/3 dealias,
-f=-4cos(4y), GRF alpha=2.5 tau=3.0) → comparable by construction.
-
-Run (student03, ~minutes/traj at 256^2 on GPU):
-  primary  : PYTHONPATH=$PWD python scripts/generate_pilot.py --re 500 --x_res 256
-  conv ref : PYTHONPATH=$PWD python scripts/generate_pilot.py --re 500 --x_res 384
-  control  : PYTHONPATH=$PWD python scripts/generate_pilot.py --re 300 --x_res 256
-
-Full set (--outdir = resumable per-chain part files, shardable by --start):
-  PYTHONPATH=$PWD python scripts/generate_pilot.py --re 500 --x_res 512 \
-    --start 0 --n_samples 300 --outdir <dir>          # serial 0..299
-  ... or split across GPUs: --start {0,100,200} --n_samples 100 into same --outdir
+Thesis data (per-trajectory part files, then stack_parts.py / downsample.py):
+  python -m src.solver.generate_trajectories --re 100 --x_res 256 --n_samples 300 --outdir <dir>
+  python -m src.solver.generate_trajectories --re 500 --x_res 512 --n_samples 300 --outdir <dir>
+Shard across GPUs with --start {0,100,200} --n_samples 100 into the same --outdir.
 """
 
 import argparse
