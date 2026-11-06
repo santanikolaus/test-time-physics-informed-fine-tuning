@@ -1,0 +1,46 @@
+# @package _global_
+# Path-B floor-gate — op500 @256², n_modes=[16,16,8], hidden=32. TITAN V (12 GB).
+# Tests whether more spectral modes + clean 256² data move the k≤7 wall.
+# Base-train from scratch (no warm-start). grad_checkpoint required to fit (~6.6 GB).
+# Eval k≤7 on 256² held-out [200:300], paired vs op500@128 run on 256² ICs.
+# Time-modes stay 8 (temporal sweep dead); pairs with h64 (P40) to bound the width effect.
+
+defaults:
+  - override /callbacks: kf
+
+grad_checkpoint: true
+
+logger:
+  wandb:
+    project: pathB-256
+    name: re500-256-n16-h32
+
+trainer:
+  max_epochs: 150
+  check_val_every_n_epoch: 5
+
+data:
+  data_path: /system/user/studentwork/wehofer/data/ns/NS_fine_Re500_T128_res256_part0.npy
+  n_train: 200
+  n_val: 60
+  batch_size: 1
+  sub_t: 2
+  num_workers: 0
+
+model:
+  n_modes: [16, 16, 8]
+  lifting_channel_ratio: 0
+  hidden_channels: 32
+
+loss:
+  re: 500
+  t_interval: 1.0
+  data_weight: 5.0
+  pde_weight: 1.0
+  ic_weight: 1.0
+
+opt:
+  learning_rate: 0.001
+  weight_decay: 0.0
+  milestones: [25, 50, 75, 100]
+  gamma: 0.5

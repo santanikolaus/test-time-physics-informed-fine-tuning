@@ -60,7 +60,8 @@ def build_splits(cfg: DictConfig, train_cfg: DictConfig) -> tuple:
     test ([270:300]) is reserved for the one locked read at the end of the ladder,
     on the config picked from val, and is reached with cfg.heldout_split=test. The
     probe set never enters the gradient path, so both splits score the same
-    adaptation trajectory.
+    adaptation trajectory. cfg.pool_path, when set, swaps only the file the pool is
+    drawn from; the held-out set stays on the target-Re data.
 
     Args:
       cfg: resolved client config, as returned by load_config().
@@ -77,7 +78,13 @@ def build_splits(cfg: DictConfig, train_cfg: DictConfig) -> tuple:
     target_cfg.data.data_path = setup.data_path_for_re(cfg.target_re)
 
     heldout = setup.build_dataset(target_cfg, cfg.heldout_split)
-    train = setup.build_dataset(target_cfg, "train")
+    pool_cfg = target_cfg
+    if cfg.get("pool_path") is not None:
+        if target_cfg.data.get("coarse_path") is not None:
+            raise ValueError("pool_path cannot be combined with a coarse_path operator")
+        pool_cfg = copy.deepcopy(target_cfg)
+        pool_cfg.data.data_path = cfg.pool_path
+    train = setup.build_dataset(pool_cfg, "train")
     pool_n = cfg.objective.get("pool_n", 1)
     pool_offset = cfg.get("pool_offset", 0)
     if pool_offset + pool_n > len(train):
@@ -128,7 +135,8 @@ def describe(cfg: DictConfig, model: torch.nn.Module, train_cfg: DictConfig) -> 
             f"movable     : {counts['effective']:,} of {n_params:,} entries "
             f"({100 * counts['effective'] / n_params:.2f}%), {counts['trainable']:,} selected",
             f"pool        : {cfg.objective.get('pool_n', 1)} samples "
-            f"(train [{cfg.get('pool_offset', 0)}:{cfg.get('pool_offset', 0) + cfg.objective.get('pool_n', 1)}))",
+            f"(train [{cfg.get('pool_offset', 0)}:{cfg.get('pool_offset', 0) + cfg.objective.get('pool_n', 1)}) "
+            f"of {cfg.get('pool_path') or setup.data_path_for_re(cfg.target_re)})",
             f"heldout     : {setup.SPLIT[cfg.heldout_split]['n']} samples "
             f"({cfg.heldout_split} split, offset {setup.SPLIT[cfg.heldout_split]['offset']})",
             f"budget      : {cfg.steps} steps @ lr={cfg.lr}",
@@ -151,10 +159,12 @@ def run_name(cfg: DictConfig) -> str:
 
     Returns:
       A name like "fno-physics-modes-k012-n1-lr3e-04-s10", plus "-d150-250" when
-      lr decays and "-test" on the locked read; the locus fragment comes from
-      locus.label, so two shell sets of one arm never share a name.
+      lr decays, "-<pool file stem>" when pool_path is set and "-test" on the locked
+      read; the locus fragment comes from locus.label, so two shell sets of one arm
+      never share a name.
     """
     shift = f"-p{cfg.get('pool_offset', 0)}" if cfg.get("pool_offset", 0) else ""
+    shift += f"-{Path(cfg.pool_path).stem}" if cfg.get("pool_path") else ""
     nu = "" if cfg.get("pde_re", None) is None else f"-nu{loop.loss_re(cfg):g}"
     decay = "-d" + "-".join(str(m) for m in cfg.lr_milestones) if cfg.lr_milestones else ""
     held = "" if cfg.heldout_split == "val" else f"-{cfg.heldout_split}"
@@ -209,6 +219,7 @@ def _save_arrays(path: str, snapshots: list, losses: list, cfg: DictConfig,
         "probe_every": cfg.probe_every,
         "pool_n": pool_n,
         "pool_split": f"train offset={cfg.get('pool_offset', 0)} n={pool_n}",
+        "pool_path": str(cfg.get("pool_path") or target_cfg.data.data_path),
         "heldout_split": (f"{cfg.heldout_split} offset={setup.SPLIT[cfg.heldout_split]['offset']}"
                           f" n={setup.SPLIT[cfg.heldout_split]['n']}"),
         "target_path": target_cfg.data.data_path,

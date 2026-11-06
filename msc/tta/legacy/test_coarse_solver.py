@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from msc.tta.coarse_solver import CoarseSolver, materialize, spectral_pad, _BLOWUP_ABS_MAX
+from msc.tta.legacy.coarse_solver import CoarseSolver, materialize, spectral_pad, _BLOWUP_ABS_MAX
 from scripts.chaos_spread_gate import kf_forcing, solve_from_ic
 from scripts.res512_gate import spectral_resample
 from scripts.solver_closure_gate import band_power_frames

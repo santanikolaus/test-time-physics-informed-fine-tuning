@@ -141,7 +141,7 @@ def run_re(re: int, train_re: int, model, masks: torch.Tensor,
         if i == 0 and w.shape[1] != S_GRID:
             raise ValueError(f"Expected spatial size {S_GRID}, got {w.shape[1]}. "
                              f"Mask partition assumes fixed S_GRID.")
-        Du = ns.residual(w)                                    # (1, S, S, T-2)
+        Du, _ = ns.residual(w)                                  # (1, S, S, T-2)
         forcing = ns.get_forcing(w.shape[1], device).expand_as(Du)
         r  = Du - forcing
         r_h = torch.fft.fft2(r, dim=[1, 2])                    # complex, (1, S, S, T-2)

@@ -95,7 +95,7 @@ def run(dataset, solver, f, M, delta, re, T, dt, kinf, kmax, wl, device):
 def report(ratios, d_lates, kmax, delta) -> dict:
     log_r = np.log(ratios + EPS)
     sr = spearmanr(log_r, d_lates)
-    rho, pval = float(sr[0]), float(sr[1])
+    rho, pval = float(sr.correlation), float(sr.pvalue)  # type: ignore[attr-defined]
     q25 = float(np.percentile(ratios, 25.0))
     q50 = float(np.percentile(ratios, 50.0))
     q75 = float(np.percentile(ratios, 75.0))

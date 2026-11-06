@@ -11,7 +11,7 @@ import torch
 
 from scripts.chaos_spread_gate import kf_forcing, solve_from_ic
 from src.solver.periodic import NavierStokes2d
-from msc.tta.infer_nu import infer_nu
+from msc.tta.legacy.infer_nu import infer_nu
 
 DEVICE = torch.device("cpu")
 S = 32

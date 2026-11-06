@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import yaml
 
-from msc.tta.infer_nu import infer_nu
+from msc.tta.legacy.infer_nu import infer_nu
 
 _ROOT = Path(__file__).resolve().parents[2]
 _PATHS = yaml.safe_load((_ROOT / "msc" / "configs" / "paths.yaml").read_text())

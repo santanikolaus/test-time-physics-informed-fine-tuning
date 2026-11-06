@@ -131,7 +131,7 @@ def make_figure(ic, gt_frames, pred_frames, out_path: str):
 
 def _default_paths():
     cfg = yaml.safe_load(
-        (Path(__file__).parent.parent / "documentation" / "paths.yaml").read_text()
+        (Path(__file__).parent.parent.parent / "documentation" / "paths.yaml").read_text()
     )
     project = Path(cfg["root"]["studentwork"]) / "pino-lightning"
     # run 38o0kj3y = 1_pino-re500-pretrain (table08.md)

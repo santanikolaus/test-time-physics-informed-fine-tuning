@@ -50,6 +50,12 @@ def kf_forcing(S, device, dtype):
     return -4.0 * torch.cos(4.0 * Y)
 
 
+def eddy_time(ic):
+    """Enstrophy-based eddy-turnover time τ ≈ 1/ω_rms for a vorticity field (S,S) — the clock that
+    anchors T and N_cap in turnover units (Nastac sanity gate: t_p brackets τ_η..τ_eddy)."""
+    return 1.0 / (float((ic ** 2).mean().sqrt()) + 1e-30)
+
+
 def unit_dir(S, kmax, banded, device, gen, dtype):
     """Unit-L2 perturbation direction; banded ⇒ restricted to k≤kmax (else white/full-spectrum)."""
     d = torch.randn(S, S, generator=gen, device=device, dtype=dtype)
@@ -75,17 +81,20 @@ def frozen_dt(solver, ic, f, Re, dt_record):
     return min(solver.time_step(q, v, f, Re), dt_record)
 
 
-def separation(solver, ic_ref, ic_pert, f, n_frames, dt_record, Re, dt_sub, kmax):
+def separation(solver, ic_ref, ic_pert, f, n_frames, dt_record, Re, dt_sub, kmax, roll_mult=1):
     """Roll ref+pert in lockstep (one fixed delta_t) ⇒ per-frame full-field and k≤7 ‖δ(t)‖.
 
-    Returns (full, band): arrays length n_frames, full[0]=‖ic_pert-ic_ref‖.
+    roll_mult>1 rolls past the data window (Nastac rolls to SATURATION to expose the linear
+    region between initial-response and plateau; forced KF is stationary so this is valid).
+    Returns (full, band): arrays length (n_frames-1)*roll_mult+1, full[0]=‖ic_pert-ic_ref‖.
     """
+    n_eff = (n_frames - 1) * roll_mult + 1
     w = torch.stack([ic_ref, ic_pert])
-    full = np.empty(n_frames)
-    band = np.empty(n_frames)
+    full = np.empty(n_eff)
+    band = np.empty(n_eff)
     d0 = ic_pert - ic_ref
     full[0], band[0] = float(d0.norm()), band_norm(d0, kmax)
-    for fr in range(1, n_frames):
+    for fr in range(1, n_eff):
         w = solver.advance(w, f, T=dt_record, Re=Re, adaptive=False, delta_t=dt_sub)
         d = w[1] - w[0]
         full[fr], band[fr] = float(d.norm()), band_norm(d, kmax)
@@ -119,12 +128,16 @@ def fit_lyapunov(t, ln_sep, min_efolds, min_pts):
 
 
 def measure(solver, ds, f, Re, eps_list, n_dirs, n_frames, dt_record, kmax,
-            banded, min_efolds, min_pts, dt_factor, device, dtype):
+            banded, min_efolds, min_pts, dt_factor, roll_mult, device, dtype):
     """Per-ε aggregate λ over instances×directions for one clock (full or k≤7)."""
-    t = np.arange(n_frames) * dt_record
+    n_eff = (n_frames - 1) * roll_mult + 1
+    t = np.arange(n_eff) * dt_record
+    stride = max(1, n_eff // 200)
+    tf = t[::stride]
     out = {}
     for eps in eps_list:
         lam_full, lam_band, n_fit, n_total = [], [], 0, 0
+        amp_f, amp_b = [], []
         for i in range(len(ds)):
             ic = ds[i]["y"][:, :, 0].to(device).to(dtype)
             dt_sub = frozen_dt(solver, ic, f, Re, dt_record) * dt_factor
@@ -133,17 +146,30 @@ def measure(solver, ds, f, Re, eps_list, n_dirs, n_frames, dt_record, kmax,
                 gen.manual_seed(i * 100003 + m * 97 + int(eps * 1e9))
                 d = unit_dir(ic.shape[-1], kmax, banded, device, gen, dtype)
                 full, band = separation(solver, ic, perturb(ic, eps, d), f,
-                                         n_frames, dt_record, Re, dt_sub, kmax)
+                                         n_frames, dt_record, Re, dt_sub, kmax, roll_mult)
                 n_total += 1
-                ff = fit_lyapunov(t, np.log(full + 1e-300), min_efolds, min_pts)
-                bf = fit_lyapunov(t, np.log(band + 1e-300), min_efolds, min_pts)
+                amp_f.append(amplification(full[:n_frames]))
+                amp_b.append(amplification(band[:n_frames]))
+                ff = fit_lyapunov(tf, np.log(full[::stride] + 1e-300), min_efolds, min_pts)
+                bf = fit_lyapunov(tf, np.log(band[::stride] + 1e-300), min_efolds, min_pts)
                 if ff is not None:
                     lam_full.append(ff["lmbda"]); n_fit += 1
                 if bf is not None:
                     lam_band.append(bf["lmbda"])
         out[eps] = {"full": _stat(lam_full), "band": _stat(lam_band),
+                    "amp_full": _amp_stat(amp_f), "amp_band": _amp_stat(amp_b),
                     "n_fit": n_fit, "n_total": n_total}
-    return out, t[-1]
+    return out, (n_frames - 1) * dt_record
+
+
+def amplification(curve):
+    """(end, peak) separation amplification vs t=0: ‖δ(T)‖/‖δ(0)‖ and max‖δ‖/‖δ(0)‖.
+
+    Gate-free — quantifies the null when no linear region clears the e-fold gate. end<e ⇒ the
+    perturbation has not grown one e-fold over the window ⇒ t_p > T empirically (Nastac Eq. 6).
+    """
+    d0 = float(curve[0]) + 1e-300
+    return float(curve[-1]) / d0, float(curve.max()) / d0
 
 
 def _stat(xs):
@@ -151,6 +177,11 @@ def _stat(xs):
         return None
     a = np.asarray(xs)
     return {"mean": float(a.mean()), "std": float(a.std()), "n": len(a)}
+
+
+def _amp_stat(pairs):
+    a = np.asarray(pairs)
+    return {"end": float(np.median(a[:, 0])), "peak": float(np.median(a[:, 1])), "n": len(a)}
 
 
 def report(label, res, horizon):
@@ -168,8 +199,17 @@ def report(label, res, horizon):
             tp = 1.0 / lam if lam > 0 else float("inf")
             print(f"    {tag}: {lam:.4f} ± {s['std']:.4f} (n={s['n']})  "
                   f"t_p={tp:.3f}  N_cap={tp / dt:.1f}  λ·T={lam * horizon:.3f}")
-    print("  λ·T≪1 ⇒ horizon beyond window (chaos permits whole-window prediction); "
-          "ε-invariance of λ ⇒ tangent regime.")
+        for clock, key in (("full", "amp_full"), ("k≤7", "amp_band")):
+            a = r[key]
+            ef = math.log(a["end"]) if a["end"] > 0 else float("-inf")
+            ncap = 128.0 / ef if ef > 0 else float("inf")
+            bound = "t_p ≥ T (chaos beyond window)" if ef < 1.0 else "t_p < T (chaos bites in-window)"
+            print(f"    amp {clock:>4}: A_end={a['end']:.3f} (e-folds={ef:.3f}) A_peak={a['peak']:.3f}"
+                  f"  ⇒ {bound}; extrap N_cap≈{ncap:.0f}")
+    print("  e-folds(A_end)<1 ⇒ horizon beyond window EMPIRICALLY (Nastac Eq.6, no extrapolation).")
+    print("  extrap N_cap=128/e-folds assumes exponential continuation at the window-mean rate —")
+    print("  likely OPTIMISTIC if the window is still pre-exponential (true λ from a later linear")
+    print("  region would be larger ⇒ shorter horizon). A_peak≫A_end ⇒ growth-then-saturation.")
 
 
 def resolve_data(data_re, res):
@@ -193,6 +233,8 @@ def main():
     ap.add_argument("--min_pts", type=int, default=5)
     ap.add_argument("--dt_factor", type=float, default=1.0,
                     help="scale the frozen substep; rerun at 0.5 to check timestep convergence of λ")
+    ap.add_argument("--roll_mult", type=int, default=1,
+                    help="roll past the data window by this factor to expose the linear region (Nastac)")
     ap.add_argument("--selftest", action="store_true")
     args = ap.parse_args()
     if args.selftest:
@@ -205,15 +247,19 @@ def main():
     ds = Subset(full, range(min(args.n, len(full))))
     S, T = ds[0]["y"].shape[0], ds[0]["y"].shape[-1]
     dt_record = setup.T_INTERVAL / (T - 1)
+    tau = float(np.median([eddy_time(ds[i]["y"][:, :, 0]) for i in range(len(ds))]))
     solver = NavierStokes2d(S, S, 2 * math.pi, 2 * math.pi, device=device, dtype=dtype)
     f = kf_forcing(S, device, dtype)
     print(f"lyapunov gate  data_re={args.data_re} res={S} n={len(ds)} dirs={args.dirs} "
-          f"spectrum={args.spectrum} kmax={args.kmax} frames={T} dt_record={dt_record:.5f} "
-          f"eps={args.eps} device={device}", flush=True)
+          f"spectrum={args.spectrum} kmax={args.kmax} frames={T} roll_mult={args.roll_mult} "
+          f"dt_record={dt_record:.5f} eps={args.eps} device={device}\n"
+          f"  units: τ_eddy≈1/ω_rms={tau:.4f}  ⇒  data window T={setup.T_INTERVAL} = "
+          f"{setup.T_INTERVAL / tau:.2f} eddy-turnovers; roll spans {args.roll_mult * setup.T_INTERVAL / tau:.2f}",
+          flush=True)
     res, horizon = measure(solver, ds, f, args.data_re, args.eps, args.dirs, T, dt_record,
                            args.kmax, banded=(args.spectrum == "band"),
                            min_efolds=args.min_efolds, min_pts=args.min_pts,
-                           dt_factor=args.dt_factor, device=device, dtype=dtype)
+                           dt_factor=args.dt_factor, roll_mult=args.roll_mult, device=device, dtype=dtype)
     report(f"Re{args.data_re}@{S}² ({args.spectrum})", res, horizon)
 
 
@@ -260,8 +306,18 @@ def selftest():
     assert f3 is not None and abs(f3["lmbda"] - lam_true) < 0.2, \
         "three-region curve ⇒ recovers the linear-region slope, not transient/saturation"
 
+    assert abs(eddy_time(torch.full((8, 8), 2.0, dtype=torch.float64)) - 0.5) < 1e-9, \
+        "eddy_time = 1/ω_rms (ω_rms=2 ⇒ τ=0.5)"
+
+    end, peak = amplification(np.array([1.0, 8.0, 4.0]))
+    assert end == 4.0 and peak == 8.0, "amplification = (last/first, max/first)"
+    st = _amp_stat([(4.0, 8.0), (2.0, 4.0)])
+    assert st["end"] == 3.0 and st["peak"] == 6.0 and st["n"] == 2, "amp stat = medians"
+    assert abs(128.0 / math.log(amplification(np.array([1.0, math.e]))[0]) - 128.0) < 1e-9, \
+        "A_end=e ⇒ one e-fold ⇒ extrap N_cap=128 (boundary t_p=T)"
+
     print("selftest OK (perturb ε, unit/banded dir, band_norm, λ-recovery, ln-vs-log10, "
-          "gate-rejects-flat, three-region)")
+          "gate-rejects-flat, three-region, amplification+N_cap)")
 
 
 if __name__ == "__main__":

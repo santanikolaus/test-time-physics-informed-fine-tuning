@@ -24,7 +24,7 @@ wandb_api_key.txt
 
 documentation/
 practical-txt
-scripts/
+scripts/outputs_server/
 
 __pycache__/
 *.py[cod]

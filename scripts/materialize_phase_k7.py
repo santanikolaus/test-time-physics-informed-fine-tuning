@@ -9,6 +9,12 @@ minimum is at |pred_k| = cos(Δφ) with residual sin²(Δφ), strictly monotone
 in phase error.  Not the same as 2*(1−cos(Δφ)) — amplitude-hedging is not
 structurally forbidden, only unrewarded.  Score via per-shell A_k, not relL2.
 
+After unit-amplitude normalization the spatial RMS is sqrt(N_modes)/S² ≈ 9e-4,
+which makes the IC channel invisible against O(1) grid coordinates in the
+FNO lifting layer.  A global scale of S²/sqrt(N_modes) ≈ 1094 is applied so
+spatial RMS ≈ 1.  This preserves the phase structure (all retained modes equal
+amplitude after scaling).
+
 Near-zero modes (|u_hat| < eps) are left at zero — no phase information to keep.
 DC (k=0,0) is excluded from normalization: its amplitude is numerical mean
 residual with sign flickering frame-to-frame, carrying no phase to learn.
@@ -33,13 +39,24 @@ _ROOT = Path(__file__).parent.parent
 DATA_ROOT = Path(yaml.safe_load((_ROOT / "documentation" / "paths.yaml").read_text())["data"]["ns"])
 
 
+def phase_scale_factor(S: int, kmax: int) -> float:
+    """Scale to bring phase-normalized field spatial RMS to ~1.
+
+    After unit-amplitude ifft2: RMS = sqrt(N_modes) / S².
+    Inverse: S² / sqrt(N_modes).  N_modes = (2*kmax+1)^2 - 1 (L-inf box, no DC).
+    """
+    N_modes = (2 * kmax + 1) ** 2 - 1
+    return float(S ** 2) / float(N_modes ** 0.5)
+
+
 def phase_normalize(field: Tensor, kmax: int, eps: float = 1e-8) -> Tensor:
-    """Set k<=kmax modes to unit amplitude; zero k>kmax.
+    """Set k<=kmax modes to unit amplitude, scale to RMS~1, zero k>kmax.
 
     field: (B, S, S, T) real vorticity
     Returns same shape, same dtype.
     """
-    mask = cheb_band_mask(field.shape[1], kmax, field.device)  # (S, S)
+    S = field.shape[1]
+    mask = cheb_band_mask(S, kmax, field.device)               # (S, S)
     fh = torch.fft.fft2(field, dim=(1, 2))                     # (B, S, S, T) complex
     amp = fh.abs()                                              # (B, S, S, T)
 
@@ -48,7 +65,8 @@ def phase_normalize(field: Tensor, kmax: int, eps: float = 1e-8) -> Tensor:
     safe   = inside & (amp >= eps)
 
     fh_norm = torch.where(safe, fh / amp, torch.zeros_like(fh))
-    return torch.fft.ifft2(fh_norm, dim=(1, 2)).real
+    out = torch.fft.ifft2(fh_norm, dim=(1, 2)).real
+    return out * phase_scale_factor(S, kmax)
 
 
 def phase_normalize_array(arr: np.ndarray, kmax: int, device: torch.device) -> np.ndarray:
@@ -86,19 +104,20 @@ def main():
     mm.flush()
     print(f"done -> {out_path}")
 
-    # Verification: check a sample batch for phase preservation and k>kmax suppression
+    # Verification: spatial RMS ~1, k>kmax suppressed, phase preserved vs raw
     sample = torch.from_numpy(np.ascontiguousarray(mm[:min(4, N)])).permute(0, 2, 3, 1).to(device)
     raw    = torch.from_numpy(np.ascontiguousarray(src[:min(4, N)])).permute(0, 2, 3, 1).to(device)
     fh_out = torch.fft.fft2(sample, dim=(1, 2))
     fh_raw = torch.fft.fft2(raw,    dim=(1, 2))
     mask_v = cheb_band_mask(S, args.kmax, device).bool()
-    mask_v[0, 0] = False  # exclude DC from checks
-    in_amp  = fh_out.abs()[mask_v[None, :, :, None].expand_as(fh_out.abs())]
-    out_amp = fh_out.abs()[~mask_v[None, :, :, None].expand_as(fh_out.abs())]
-    cos_sim = (fh_out * fh_raw.conj()).real / (fh_raw.abs().clamp(min=1e-8) * fh_out.abs().clamp(min=1e-8))
-    phase_cos = cos_sim[mask_v[None, :, :, None].expand_as(cos_sim) & (fh_raw.abs() >= 1e-8)]
-    print(f"verify | in-band amp mean={in_amp.mean():.4f} (expect ~1.0) "
-          f"| out-band amp max={out_amp.abs().max():.2e} (expect ~0) "
+    mask_v[0, 0] = False
+    m4 = mask_v[None, :, :, None].expand_as(fh_out.abs())
+    out_k_gt7 = fh_out.abs()[~m4].max()
+    cos_sim   = (fh_out * fh_raw.conj()).real / (
+        fh_raw.abs().clamp(min=1e-8) * fh_out.abs().clamp(min=1e-8))
+    phase_cos = cos_sim[m4 & (fh_raw.abs() >= 1e-8)]
+    print(f"verify | spatial RMS={sample.std():.4f} (expect ~1.0) "
+          f"| out-band amp max={out_k_gt7:.2e} (expect ~0) "
           f"| phase cos mean={phase_cos.mean():.4f} (expect ~1.0)")
 
 
