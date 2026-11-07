@@ -212,6 +212,21 @@ def test_build_splits_does_not_mutate_original_train_cfg(monkeypatch, train_cfg)
     assert target_cfg["data"]["data_path"] == "/data/Re500_res128_part0.npy"
 
 
+def test_build_monitor_takes_chains_right_after_the_pool_from_the_target_file(monkeypatch):
+    built = []
+    monkeypatch.setattr(adapt.setup, "build_dataset",
+                        lambda cfg, split: built.append(cfg.data.data_path) or list(range(240)))
+    target_cfg = _cfg({"data": {"data_path": "/data/Re500_res128_part0.npy"}})
+    cfg = _cfg({"pool_offset": 10, "pool_path": "/a5/pool_tau0.npy", "monitor_n": 3,
+                "objective": {"pool_n": 5}})
+
+    monitor = adapt.build_monitor(cfg, target_cfg)
+
+    assert list(monitor.indices) == [15, 16, 17]
+    assert built == ["/data/Re500_res128_part0.npy"]
+    assert adapt.build_monitor(_cfg({"monitor_n": 0, "objective": {"pool_n": 5}}), target_cfg) is None
+
+
 def test_build_splits_heldout_defaults_to_val_not_test(monkeypatch, train_cfg):
     """heldout defaults to val [240:270] — test is the single locked read, not probe fodder."""
     _stub_setup(monkeypatch, train_len=100, val_len=7)
