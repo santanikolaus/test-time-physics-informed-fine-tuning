@@ -5,16 +5,12 @@ Two source formats supported:
   --parts-dir    per-chain part files      [Re500 512^2, generation layout]
 
 Run (server, where the data lives):
-    # Re500 256->16 spectral
-    PYTHONPATH=$PWD python scripts/materialize_res256.py --re 500 --s-out 16 \
+    # Re500 512->256 spectral (per-chain parts)
+    python -m src.solver.downsample --re 500 --s-out 256
+
+    # Re500 / Re100 256->128 spectral (stacked file)
+    python -m src.solver.downsample --re 500 --s-out 128 \
         --source-file /path/to/NS_fine_Re500_T128_res256_part0.npy
-
-    # Re100 256->16 strided
-    PYTHONPATH=$PWD python scripts/materialize_res256.py --re 100 --s-out 16 --method strided \
-        --source-file /path/to/NS_fine_Re100_T128_res256_part0.npy
-
-    # Re500 512->256 spectral (legacy per-chain parts)
-    PYTHONPATH=$PWD python scripts/materialize_res256.py --re 500 --s-out 256
 """
 import argparse
 from pathlib import Path
@@ -23,14 +19,39 @@ import numpy as np
 import torch
 import yaml
 
-from scripts.res512_gate import spectral_resample, spatial_resample_strided
+
+def spectral_resample(field: torch.Tensor, s_out: int) -> torch.Tensor:
+    """Spectral (FFT-crop) downsample (n,S,S,T) real -> (n,s_out,s_out,T), s_out<S.
+
+    Ideal sharp low-pass at the new Nyquist: keeps modes |k|<=s_out/2 EXACTLY (so
+    every retained shell, incl. k<=7, is byte-identical to the source) and aliases
+    nothing. Amplitudes scale by (s_out/S)^2 to stay physical across the grid change.
+    This is the discretization-consistent restriction for pseudo-spectral periodic
+    data; strided/box downsampling would alias or attenuate resolved modes."""
+    S = field.shape[1]
+    fh = torch.fft.fftshift(torch.fft.fft2(field, dim=(1, 2)), dim=(1, 2))
+    c, h = S // 2, s_out // 2
+    crop = torch.fft.ifftshift(fh[:, c - h:c + h, c - h:c + h, :], dim=(1, 2))
+    return (torch.fft.ifft2(crop, dim=(1, 2)).real * (s_out ** 2) / (S ** 2))
+
+
+def spatial_resample_strided(field: torch.Tensor, s_out: int) -> torch.Tensor:
+    """Strided downsample (n,S,S,T) -> (n,s_out,s_out,T).
+
+    Aliases high-k modes into low-k bands (common ML-paper shortcut, not
+    physically correct for pseudo-spectral data). s_out must exactly divide S."""
+    S = field.shape[1]
+    assert S % s_out == 0, f"s_out={s_out} does not divide S={S}"
+    step = S // s_out
+    return field[:, ::step, ::step, :]
+
 
 _METHODS = {
     "spectral": spectral_resample,
     "strided":  spatial_resample_strided,
 }
 
-_ROOT = Path(__file__).parent.parent
+_ROOT = Path(__file__).parents[2]
 DATA_ROOT = Path(yaml.safe_load((_ROOT / "msc" / "configs" / "paths.yaml").read_text())["data"]["ns"])
 
 
