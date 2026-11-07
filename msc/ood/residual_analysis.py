@@ -39,8 +39,8 @@ class ResidualAnalysis:
 
         out = np.zeros((power.shape[0], k_max + 1))
         for k in range(k_max + 1):
-            # NOTE: sum biases toward outer shells (more cells per shell). Also
-            # inspect with .mean() so shell size doesn't drive the per-k curve.
+            # NOTE: sum biases outer shells (more cells) only for raw E(k) plots;
+            # Cohen's d is scale-invariant per shell, so sum vs mean leaves d unchanged.
             out[:, k] = power[:, k_inf == k].sum(axis=-1)
         return out
 

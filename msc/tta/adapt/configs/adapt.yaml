@@ -18,6 +18,8 @@ lr_milestones: []  # optimizer steps at which lr halves; [] = constant lr
 lr_gamma: 0.5
 probe_every: 1
 pool_offset: 0  # first train chain in the adapt pool; shift it to re-run a cell on different chains
+pool_path: null  # file the adapt pool is drawn from; null = target_re's file. The held-out
+                 # set and every reported metric stay on target_re.
 heldout_split: val  # chains the probe scores. val [240:270] while the ladder is being
                     # selected; test for the one locked read on a frozen config. Never
                     # reaches the gradient path — both splits score the same trajectory.
@@ -26,5 +28,8 @@ out_dir: msc/tta/outputs/adapt/${exp}  # relative to setup.ROOT, not the CWD
 save_weights: false  # write the adapted state_dict so a later test read needs no re-run.
                      # ~85 MB per file (FNO 21.1M fp32); off by default. On: the final step
                      # is always written.
+obs_frames: 0  # observed frames 1..m per adaptation window that enter the loss (data term); 0 = label-free
+data_weight: 5.0  # weight of the observed-frame term, read only when obs_frames > 0
+monitor_n: 0  # monitoring windows: target train chains right after the pool, probed every snapshot, never in the gradient
 save_every: null  # only read when save_weights; additionally write every N-th step.
                   # null = final step only. Set it to probe_every to keep every probed step.

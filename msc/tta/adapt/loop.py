@@ -10,10 +10,11 @@ from src.pde.ns import KFLoss
 
 from ..eval import eval as ev
 from ..eval.report import F_RMS
-from . import locus, probe
+from . import decide, locus, probe
 
 
 BANDS = {"k1-64": slice(1, None), "k1-4": slice(1, 5), "k5-7": slice(5, 8), "k8+": slice(8, None)}
+MONITOR_FRAMES = 8
 RHO_THRESH = 0.9
 W1_FRAMES = (4, 63)
 WEIGHTED_OBJECTIVES = ("physics", "pde", "ic")
@@ -35,16 +36,32 @@ def loss_re(cfg) -> int:
 
 
 def _loss_fn(cfg) -> KFLoss:
-    """Builds the label-free adaptation loss from the objective's pde/ic weights.
+    """Builds the adaptation loss from the objective's pde/ic weights.
 
-    data_weight is fixed at 0.0 and deliberately not configurable: it is the
-    GT-supervision term, and the method's OOD legality rests on it being zero.
+    KFLoss's data_weight stays 0.0: its data term covers every frame, which a
+    deployment never observes. Supervision on the few observed frames is added
+    separately by _observed_loss, gated by cfg.obs_frames.
     """
     if cfg.objective.name not in WEIGHTED_OBJECTIVES:
         raise NotImplementedError(f"objective {cfg.objective.name!r} not wired yet")
     return KFLoss(re=loss_re(cfg), data_weight=0.0,
                   pde_weight=cfg.objective.pde_weight,
                   ic_weight=cfg.objective.ic_weight)
+
+
+def _observed_loss(loss_fn: KFLoss, pred: torch.Tensor, target: torch.Tensor, m: int) -> torch.Tensor:
+    """Relative L2 on the observed frames 1..m of one adaptation window.
+
+    Args:
+      loss_fn: the run's KFLoss, whose LpLoss sets the reduction.
+      pred: (B, 1, S, S, T) predicted rollout.
+      target: (B, S, S, T) window with the observed frames at indices 1..m.
+      m: number of observed frames after the IC, 1 <= m < T.
+
+    Returns:
+      Scalar loss.
+    """
+    return loss_fn.lp.rel(pred.squeeze(1)[..., 1:m + 1], target[..., 1:m + 1])
 
 
 def _enable_checkpointing(model: torch.nn.Module) -> None:
@@ -73,11 +90,14 @@ def _enable_checkpointing(model: torch.nn.Module) -> None:
         f"no activation-checkpointing path for {type(model).__name__}")
 
 
-def _eval(model, pool, heldout, target_cfg: DictConfig, regime, device, step: int) -> dict:
-    """Measures pool (transductive) and heldout (inductive) via the eval client."""
-    pool_measurement = probe.measure(model, pool, target_cfg, regime, device)
-    heldout_measurement = probe.measure(model, heldout, target_cfg, regime, device)
-    return {"step": step, "pool": pool_measurement, "heldout": heldout_measurement}
+def _eval(model, pool, heldout, target_cfg: DictConfig, regime, device, step: int,
+          monitor=None) -> dict:
+    """Measures pool (transductive), heldout (inductive) and, if given, the monitoring windows."""
+    out = {"step": step, "pool": probe.measure(model, pool, target_cfg, regime, device),
+           "heldout": probe.measure(model, heldout, target_cfg, regime, device)}
+    if monitor is not None:
+        out["monitor"] = probe.measure(model, monitor, target_cfg, regime, device)
+    return out
 
 
 def _print_progress(snapshot: dict) -> None:
@@ -102,13 +122,16 @@ def _step_metrics(step_losses: dict) -> dict:
     Returns:
       Dict of wandb keys under the train/ namespace.
     """
-    return {
+    out = {
         "train/loss": step_losses["loss"],
         "train/pde": step_losses["pde"],
         "train/ic": step_losses["ic"],
         "train/item_rel_l2": step_losses["data"],
         "train/lr": step_losses["lr"],
     }
+    if "obs" in step_losses:
+        out["train/obs"] = step_losses["obs"]
+    return out
 
 
 def _horizon(pred_pt, gt_pt, err_pt, bands: slice) -> tuple:
@@ -164,11 +187,14 @@ def _snapshot_metrics(snapshot: dict) -> dict:
         for frame in W1_FRAMES:
             if frame < w1wc.shape[-1]:
                 out[f"{side}/w1wc_t{frame}"] = float(np.nanmean(w1wc[:, frame]))
+    if "monitor" in snapshot:
+        g = snapshot["monitor"]
+        out["monitor/err_f1-8"] = float(decide.window_error(g["err_pt"], g["gt_pt"], MONITOR_FRAMES))
     return out
 
 
 def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
-          log_fn=lambda metrics, step: None, save_fn=lambda model, step: None):
+          log_fn=lambda metrics, step: None, save_fn=lambda model, step: None, monitor=None):
     """Adapts a cloned operator on pool via fixed-step Adam, snapshotting on a schedule.
 
     Args:
@@ -192,13 +218,17 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
         caller's policy. Defaults to a no-op so loop.py stays path-agnostic.
         Called on every step, not only snapshot steps, so a save schedule
         need not be a multiple of probe_every.
+      monitor: optional monitoring windows (never in the gradient), probed at every
+        snapshot alongside pool and heldout; their early-frame error drives the stop rule.
 
     Returns:
       A tuple (model, snapshots, losses): the adapted operator (clone, eval
-      mode); one {"step", "pool", "heldout"} dict per scheduled snapshot (step
-      0 and cfg.steps always included, every cfg.probe_every steps in
-      between); and one {"loss", "data", "pde", "ic"} dict per training step.
+      mode); one {"step", "pool", "heldout"[, "monitor"]} dict per scheduled
+      snapshot (step 0 and cfg.steps always included, every cfg.probe_every
+      steps in between); and one {"loss", "data", "pde", "ic"[, "obs"]} dict
+      per training step, "obs" present when cfg.obs_frames > 0.
     """
+    obs_frames = cfg.get("obs_frames", 0)
     model = copy.deepcopy(model).to(device)
     _enable_checkpointing(model)
     model.train()
@@ -208,7 +238,7 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
     )
     loss_fn = _loss_fn(cfg)
 
-    snapshots = [_eval(model, pool, heldout, target_cfg, regime, device, 0)]
+    snapshots = [_eval(model, pool, heldout, target_cfg, regime, device, 0, monitor)]
     _print_progress(snapshots[0])
     log_fn(_snapshot_metrics(snapshots[0]), step=0)
 
@@ -222,6 +252,9 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
             temporal_pad=target_cfg.data.temporal_pad, pad_mode=target_cfg.data.pad_mode
         )
         parts = loss_fn(pred, target)
+        if obs_frames:
+            parts["obs"] = _observed_loss(loss_fn, pred, target, obs_frames)
+            parts["loss"] = parts["loss"] + cfg.data_weight * parts["obs"]
         opt.zero_grad()
         parts["loss"].backward()
         opt.step()
@@ -233,7 +266,7 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
         log_fn(_step_metrics(step_losses), step=step)
 
         if step == cfg.steps or (cfg.probe_every is not None and step % cfg.probe_every == 0):
-            snapshot = _eval(model, pool, heldout, target_cfg, regime, device, step)
+            snapshot = _eval(model, pool, heldout, target_cfg, regime, device, step, monitor)
             snapshots.append(snapshot)
             _print_progress(snapshot)
             log_fn(_snapshot_metrics(snapshot), step=step)
@@ -243,17 +276,17 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
 
 
 def collate(snapshots: list) -> dict:
-    """Stacks per-step snapshot dicts into one array per pool/heldout metric, over steps.
+    """Stacks per-step snapshot dicts into one array per side and metric, over steps.
 
     Args:
-      snapshots: list of {"step", "pool", "heldout"} dicts, as returned by adapt().
+      snapshots: list of {"step", "pool", "heldout"[, "monitor"]} dicts, as returned by adapt().
 
     Returns:
-      Dict with "step" (n_evals,) and "{pool,heldout}_{key}" arrays stacked
+      Dict with "step" (n_evals,) and "{side}_{key}" arrays stacked
       over snapshots; n_bands/T_eff kept once, unstacked (constant across steps).
     """
     out = {"step": np.array([s["step"] for s in snapshots])}
-    for side in ("pool", "heldout"):
+    for side in (k for k in snapshots[0] if k != "step"):
         for k, v in snapshots[0][side].items():
             out[f"{side}_{k}"] = v if k in ("n_bands", "T_eff") else \
                 np.stack([s[side][k] for s in snapshots])

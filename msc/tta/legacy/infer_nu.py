@@ -12,7 +12,7 @@ import torch
 from torch import Tensor
 
 from src.pde.ns import NSVorticity
-from msc.tta.coarse_solver import CoarseSolver
+from msc.tta.legacy.coarse_solver import CoarseSolver
 
 
 @dataclass

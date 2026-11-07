@@ -1,0 +1,52 @@
+# @package _global_
+# op100 capacity-isolation arm — MAX capacity at 128² (the op100 baseline dataset).
+# IDENTICAL to kf_pino_re100_pretrain.yaml (data 128² Re100 native, loss, optimizer)
+# EXCEPT the two capacity knobs: n_modes [8,8,8]→[64,64,8], hidden 128→96.
+# 21M → 755M params (36×). At 128² Nyquist=64, so [64,64,8] keeps the FULL spatial
+# spectrum — no truncation; capacity is pushed purely via width × retained modes.
+#
+# Counterpart to the 16² downsampling arms: both probe capacity-per-data, here by
+# growing the model (bigger GPU) instead of shrinking the data. Same Re100 128² GT.
+#
+# Measured peak (real PINO training step, GV100 32GB): 28.15 GB — fits, ~3.5 GB margin.
+# Run with allocator anti-fragmentation:
+#   CUDA_VISIBLE_DEVICES=4 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+#     python -m src.train_kf experiment=kf_pino_re100_maxcap_n64_h96 \
+#       trainer.accelerator=gpu trainer.devices='[0]'
+
+defaults:
+  - override /callbacks: kf
+
+logger:
+  wandb:
+    project: pretrain-kol
+    name: 1_pino-re100-maxcap-n64-h96
+
+trainer:
+  max_epochs: 150
+
+data:
+  data_path: /system/user/studentwork/wehofer/data/ns/NS_fine_Re100_T128_part0.npy
+  n_train: 200
+  n_val: 60
+  batch_size: 1
+  sub_t: 2          # raw 129 frames → 65 effective frames (matches op100 baseline)
+  num_workers: 0
+
+loss:
+  re: 100
+  t_interval: 1.0
+  data_weight: 5.0
+  pde_weight: 1.0
+  ic_weight: 1.0
+
+opt:
+  learning_rate: 0.001
+  weight_decay: 0.0
+  milestones: [25, 50, 75, 100]
+  gamma: 0.5
+
+model:
+  lifting_channel_ratio: 0   # single linear lift (paper fc0); matches op100 baseline
+  n_modes: [64, 64, 8]       # full 128² spatial spectrum (Nyquist 64) × 8 temporal
+  hidden_channels: 96        # max width that fits the 32GB GV100 at these modes

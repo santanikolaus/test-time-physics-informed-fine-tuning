@@ -1,0 +1,25 @@
+# Reserved GPU inventory — update daily before use.
+# last_updated: 2026-07-30
+#
+# Usage note for downstream LLMs:
+#   - Run commands with: conda run -p /system/apps/studentenv/wehofer python ...
+#   - From repo root:    cd /system/user/studentwork/wehofer/pino-lightning
+#   - Select GPU via:    CUDA_VISIBLE_DEVICES=<index> python ...
+
+servers:
+
+  student09:
+    gpus: [0, 1, 2, 3, 4]       # all 5 reserved
+    gpu_model: NVIDIA Titan V
+    gpu_memory_gb: 12
+    cpu: Intel Xeon Gold 6154 @ 3.00GHz
+    cpu_cores: 36
+    ram_gb: 512
+
+  student06:
+    gpus: [0]                   # only GPU 0 reserved
+    gpu_model: NVIDIA A10
+    gpu_memory_gb: 24
+    cpu:
+    cpu_cores:
+    ram_gb:

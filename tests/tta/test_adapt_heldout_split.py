@@ -33,6 +33,31 @@ def test_build_splits_probes_the_requested_split(monkeypatch, split, expected_of
     assert heldout is not None
 
 
+def test_pool_path_swaps_only_the_pool_file(monkeypatch):
+    paths = {}
+    monkeypatch.setattr(adapt.setup, "data_path_for_re", lambda re: f"Re{re}.npy")
+    monkeypatch.setattr(adapt.setup, "build_dataset",
+                        lambda cfg, name: paths.setdefault(name, cfg.data.data_path) and list(range(15)))
+    cfg = _cfg("test")
+    cfg.pool_path = "/data/pool_tau2_res128.npy"
+
+    _, _, target_cfg = adapt.build_splits(cfg, _train_cfg())
+
+    assert paths == {"test": "Re500.npy", "train": "/data/pool_tau2_res128.npy"}
+    assert target_cfg.data.data_path == "Re500.npy"
+    assert "-pool_tau2_res128-" in adapt.run_name(cfg)
+
+
+def test_pool_path_rejects_a_coarse_operator(monkeypatch):
+    monkeypatch.setattr(adapt.setup, "data_path_for_re", lambda re: f"Re{re}.npy")
+    monkeypatch.setattr(adapt.setup, "build_dataset", lambda cfg, name: list(range(15)))
+    cfg = _cfg("test")
+    cfg.pool_path = "pool.npy"
+    train_cfg = OmegaConf.create({"data": {"data_path": "unused.npy", "coarse_path": "c.npy"}})
+    with pytest.raises(ValueError, match="coarse_path"):
+        adapt.build_splits(cfg, train_cfg)
+
+
 def test_build_splits_rejects_the_train_split_as_probe_set():
     with pytest.raises(ValueError, match="heldout_split must be one of"):
         adapt.build_splits(_cfg("train"), _train_cfg())
