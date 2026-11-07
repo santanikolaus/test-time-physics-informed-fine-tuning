@@ -170,6 +170,31 @@ def test_adapt_final_step_not_duplicated_when_it_lands_on_probe_every():
     assert [s["step"] for s in snapshots] == [0, 2]
 
 
+def test_observed_loss_reads_only_frames_one_to_m():
+    pred, target = _field_pair(frames=6)
+    target = target.clone()
+    target[..., 1:3] = pred.squeeze(1)[..., 1:3]
+    loss_fn = loop._loss_fn(_cfg({"target_re": 500,
+                                  "objective": {"name": "physics", "pde_weight": 1.0, "ic_weight": 5.0}}))
+    assert loop._observed_loss(loss_fn, pred, target, m=2).item() == pytest.approx(0.0, abs=1e-7)
+    assert loop._observed_loss(loss_fn, pred, target, m=3).item() > 0.0
+
+
+def test_adapt_adds_observed_term_and_probes_monitor():
+    pool, heldout, monitor = _FakeDataset(1, 8, 5), _FakeDataset(1, 8, 5, seed=1), _FakeDataset(2, 8, 5, seed=2)
+    cfg = _adapt_cfg(steps=2, probe_every=2)
+    cfg.obs_frames, cfg.data_weight = 2, 5.0
+
+    _, snapshots, losses = loop.adapt(_tiny_model(), pool, heldout, _target_cfg(),
+                                      Regime(op_re=100, test_re=100), cfg, torch.device("cpu"),
+                                      monitor=monitor)
+
+    first = losses[0]
+    assert first["loss"] == pytest.approx(first["pde"] + 5 * first["ic"] + 5 * first["obs"], rel=1e-5)
+    assert all("monitor" in s for s in snapshots)
+    assert loop.collate(snapshots)["monitor_err_pt"].shape[:2] == (2, 2)
+
+
 def test_step_metrics_namespaces_loss_components():
     step_losses = {"loss": 1.0, "data": 2.0, "pde": 3.0, "ic": 4.0, "lr": 5e-4}
     assert loop._step_metrics(step_losses) == {

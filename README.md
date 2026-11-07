@@ -28,3 +28,15 @@ residual.
 
     pip install -r requirements.txt
     python -m msc.tta.adapt.adapt experiment=unet_nu100
+
+## Workflow
+
+- `main`: the only branch experiments run from. The server checkout stays clean on `main`
+  and is updated with `git pull`; files are never copied to it by hand.
+- `dev`: integration branch. Every change goes through a feature branch and a PR into
+  `dev`; tests run on the server before merge.
+- Once a change is settled on `dev`, a PR `dev` → `main` releases it, then the server pulls.
+- Commits stage code and configs (`.py`, `.yaml`); research notes (`.md`) stay local unless
+  they are repo documentation such as this file.
+- Authorship: commits and PRs carry the human author only. No AI co-author trailers and no
+  "generated with" lines, in commit messages, PR titles, PR bodies or comments.

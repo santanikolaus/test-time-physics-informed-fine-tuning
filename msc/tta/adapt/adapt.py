@@ -93,6 +93,29 @@ def build_splits(cfg: DictConfig, train_cfg: DictConfig) -> tuple:
     return Subset(train, range(pool_offset, pool_offset + pool_n)), heldout, target_cfg
 
 
+def build_monitor(cfg: DictConfig, target_cfg: DictConfig):
+    """Builds the monitoring windows: the cfg.monitor_n target train chains right after the pool.
+
+    Always drawn from the target-Re file, even when pool_path swaps the pool file:
+    monitoring stands for observing the deployed system, not the adaptation states.
+
+    Args:
+      cfg: resolved client config, as returned by load_config().
+      target_cfg: training config retargeted to the target-Re data, as returned by build_splits().
+
+    Returns:
+      Subset of the target train split, or None when cfg.monitor_n is 0.
+    """
+    n = cfg.get("monitor_n", 0)
+    if not n:
+        return None
+    train = setup.build_dataset(target_cfg, "train")
+    start = cfg.get("pool_offset", 0) + cfg.objective.get("pool_n", 1)
+    if start + n > len(train):
+        raise ValueError(f"monitor [{start}:{start + n}) exceeds the train split ({len(train)})")
+    return Subset(train, range(start, start + n))
+
+
 def weights_plan(cfg: DictConfig) -> str:
     """Renders which steps' weights this run will write, for the run log.
 
@@ -168,7 +191,8 @@ def run_name(cfg: DictConfig) -> str:
     nu = "" if cfg.get("pde_re", None) is None else f"-nu{loop.loss_re(cfg):g}"
     decay = "-d" + "-".join(str(m) for m in cfg.lr_milestones) if cfg.lr_milestones else ""
     held = "" if cfg.heldout_split == "val" else f"-{cfg.heldout_split}"
-    return (f"{cfg.exp}-{cfg.objective.name}-{locus.label(cfg.locus)}"
+    obs = f"-f{cfg.obs_frames}" if cfg.get("obs_frames", 0) else ""
+    return (f"{cfg.exp}-{cfg.objective.name}{obs}-{locus.label(cfg.locus)}"
             f"-n{cfg.objective.get('pool_n', 1)}{shift}{nu}-lr{cfg.lr:.0e}-s{cfg.steps}{decay}{held}")
 
 
@@ -223,6 +247,9 @@ def _save_arrays(path: str, snapshots: list, losses: list, cfg: DictConfig,
         "heldout_split": (f"{cfg.heldout_split} offset={setup.SPLIT[cfg.heldout_split]['offset']}"
                           f" n={setup.SPLIT[cfg.heldout_split]['n']}"),
         "target_path": target_cfg.data.data_path,
+        "obs_frames": cfg.get("obs_frames", 0),
+        "data_weight": cfg.get("data_weight", 0.0) if cfg.get("obs_frames", 0) else 0.0,
+        "monitor_n": cfg.get("monitor_n", 0),
         "commit": _git_sha(),
     }
     np.savez_compressed(path, **collated, **loss_arrays,
@@ -313,12 +340,14 @@ def main(overrides: list) -> None:
     model, train_cfg = build(cfg, device)
     print(describe(cfg, model, train_cfg))
     pool, heldout, target_cfg = build_splits(cfg, train_cfg)
-    print(f"splits      : pool={len(pool)}  heldout={len(heldout)}")
+    monitor = build_monitor(cfg, target_cfg)
+    print(f"splits      : pool={len(pool)}  heldout={len(heldout)}  monitor={len(monitor) if monitor else 0}"
+          f"  obs_frames={cfg.get('obs_frames', 0)}")
     regime = setup.resolve_regime(target_cfg, op_re=cfg.op_re, test_re=cfg.target_re)
     _, snapshots, losses = loop.adapt(
         model, pool, heldout, target_cfg, regime, cfg, device,
         log_fn=lambda metrics, step: run.log(metrics, step=step),
-        save_fn=make_save_fn(cfg, run.name, run.id),
+        save_fn=make_save_fn(cfg, run.name, run.id), monitor=monitor,
     )
     out_dir = setup.ROOT / cfg.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
