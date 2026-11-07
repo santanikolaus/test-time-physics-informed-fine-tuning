@@ -1,6 +1,6 @@
 import numpy as np
 
-from scripts.stack_parts import main, part_path
+from src.solver.stack_parts import main, part_path
 
 
 def test_stack_preserves_chain_order_and_shape(tmp_path, monkeypatch):
