@@ -971,3 +971,27 @@ class TestKFLossBandKmax:
         """kmax < 4 zeroes the k=4 forcing -> degenerate loss; must fail loudly."""
         with pytest.raises(AssertionError):
             KFLoss(re=40, pde_band_kmax=bad_kmax)
+
+
+class TestTimeOrder:
+
+    def test_fourth_order_stencil_exact_on_quartic_in_time(self):
+        """ω = t⁴ (uniform in space, v=0): the 5-point stencil is exact up to degree 4, the 3-point is not."""
+        t = torch.arange(T, dtype=torch.float64) / (T - 1)
+        w = (t ** 4).reshape(1, 1, 1, T).expand(1, S, S, T)
+        exact = (4 * t[2:-2] ** 3).reshape(1, 1, 1, T - 4).expand(1, S, S, T - 4)
+        res4, _ = NSVorticity(re=float("inf"), time_order=4).residual(w)
+        res2, _ = NSVorticity(re=float("inf")).residual(w)
+        assert res4.shape == (1, S, S, T - 4)
+        torch.testing.assert_close(res4, exact, atol=1e-8, rtol=1e-8)
+        assert (res2[..., 1:-1] - exact).abs().max() > 1e-3
+
+    def test_kfloss_fourth_order_band_limited_runs(self):
+        """KFLoss with time_order=4 and pde_band_kmax builds forcing on the T-4 residual grid."""
+        w = _rand(t=12)
+        out = KFLoss(re=500, pde_weight=1.0, time_order=4, pde_band_kmax=4)(w.unsqueeze(1), w)
+        assert torch.isfinite(out["pde"])
+
+    def test_bad_time_order_rejected(self):
+        with pytest.raises(AssertionError):
+            NSVorticity(re=100, time_order=3)
