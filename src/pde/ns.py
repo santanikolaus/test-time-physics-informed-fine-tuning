@@ -58,11 +58,13 @@ class NSVorticity:
     """NS vorticity equation: ∂ω/∂t + u·∇ω − ν∇²ω = f(x,y).
     residual() returns the LHS; for a true solution LHS == f."""
 
-    def __init__(self, re: float, t_interval: float = 1.0, time_order: int = 2):
+    def __init__(self, re: float, t_interval: float = 1.0, time_order: int = 2, time_edges2: bool = False):
         assert time_order in (2, 4), f"time_order must be 2 or 4, got {time_order}"
+        assert not (time_edges2 and time_order == 2), "time_edges2 only applies to time_order=4"
         self.v = 1.0 / re
         self.t_interval = t_interval
         self.time_order = time_order
+        self.time_edges2 = time_edges2
 
     def get_forcing(self, S: int, device) -> Tensor:
         """Returns f(x,y) = -4cos(4y), shape (1, S, S, 1), on the given device."""
@@ -75,7 +77,9 @@ class NSVorticity:
         """
         w: (B, S, S, T) — vorticity trajectory, channels-last
         Returns: (B, S, S, T-time_order) — LHS of NS vorticity eq at interior time steps,
-        ∂ω/∂t by 2nd- (3-point) or 4th-order (5-point) central difference.
+        ∂ω/∂t by 2nd- (3-point) or 4th-order (5-point) central difference. With
+        time_edges2 the 4th-order residual keeps t = 1 and T-2 via the 3-point stencil
+        (length T-2), so the IC frame stays coupled at weight 1/2.
         For a true solution this equals get_forcing(S, device); target it against
         forcing via lploss.rel(Du, forcing) (matches paper's PINO_loss3d).
         """
@@ -120,11 +124,11 @@ class NSVorticity:
         wlap = torch.fft.irfft2(wlap_h[:, :, :k_max + 1], dim=[1, 2])
 
         dt = self.t_interval / (nt - 1)
-        h = self.time_order // 2
-        if self.time_order == 2:
-            wt = (w[..., 2:] - w[..., :-2]) / (2 * dt)
-        else:
-            wt = (-w[..., 4:] + 8 * w[..., 3:-1] - 8 * w[..., 1:-3] + w[..., :-4]) / (12 * dt)
+        h = 1 if self.time_order == 2 or self.time_edges2 else 2
+        wt = (w[..., 2:] - w[..., :-2]) / (2 * dt)
+        if self.time_order == 4:
+            wt4 = (-w[..., 4:] + 8 * w[..., 3:-1] - 8 * w[..., 1:-3] + w[..., :-4]) / (12 * dt)
+            wt = torch.cat([wt[..., :1], wt4, wt[..., -1:]], -1) if self.time_edges2 else wt4
 
         adv = (ux * wx + uy * wy)[..., h:-h]
         diff = (-v * wlap)[..., h:-h]
@@ -245,8 +249,9 @@ class KFLoss:
                  band_mask_kmax: int | None = None,
                  band_iso_k_lo: int | None = None,
                  band_iso_k_hi: int | None = None,
-                 time_order: int = 2):
-        self.ns = NSVorticity(re=re, t_interval=t_interval, time_order=time_order)
+                 time_order: int = 2,
+                 time_edges2: bool = False):
+        self.ns = NSVorticity(re=re, t_interval=t_interval, time_order=time_order, time_edges2=time_edges2)
         self.lp = LpLoss(d=3, p=2, reduction="mean")
         self.data_weight = data_weight
         self.pde_weight = pde_weight
