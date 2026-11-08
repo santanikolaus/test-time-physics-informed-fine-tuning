@@ -58,9 +58,11 @@ class NSVorticity:
     """NS vorticity equation: ∂ω/∂t + u·∇ω − ν∇²ω = f(x,y).
     residual() returns the LHS; for a true solution LHS == f."""
 
-    def __init__(self, re: float, t_interval: float = 1.0):
+    def __init__(self, re: float, t_interval: float = 1.0, time_order: int = 2):
+        assert time_order in (2, 4), f"time_order must be 2 or 4, got {time_order}"
         self.v = 1.0 / re
         self.t_interval = t_interval
+        self.time_order = time_order
 
     def get_forcing(self, S: int, device) -> Tensor:
         """Returns f(x,y) = -4cos(4y), shape (1, S, S, 1), on the given device."""
@@ -72,7 +74,8 @@ class NSVorticity:
                  w: Tensor) -> tuple[Tensor, tuple[Tensor, Tensor, Tensor]]:
         """
         w: (B, S, S, T) — vorticity trajectory, channels-last
-        Returns: (B, S, S, T-2) — LHS of NS vorticity eq at interior time steps.
+        Returns: (B, S, S, T-time_order) — LHS of NS vorticity eq at interior time steps,
+        ∂ω/∂t by 2nd- (3-point) or 4th-order (5-point) central difference.
         For a true solution this equals get_forcing(S, device); target it against
         forcing via lploss.rel(Du, forcing) (matches paper's PINO_loss3d).
         """
@@ -117,10 +120,14 @@ class NSVorticity:
         wlap = torch.fft.irfft2(wlap_h[:, :, :k_max + 1], dim=[1, 2])
 
         dt = self.t_interval / (nt - 1)
-        wt = (w[:, :, :, 2:] - w[:, :, :, :-2]) / (2 * dt)
+        h = self.time_order // 2
+        if self.time_order == 2:
+            wt = (w[..., 2:] - w[..., :-2]) / (2 * dt)
+        else:
+            wt = (-w[..., 4:] + 8 * w[..., 3:-1] - 8 * w[..., 1:-3] + w[..., :-4]) / (12 * dt)
 
-        adv = (ux * wx + uy * wy)[..., 1:-1]
-        diff = (-v * wlap)[..., 1:-1]
+        adv = (ux * wx + uy * wy)[..., h:-h]
+        diff = (-v * wlap)[..., h:-h]
         Du = wt + adv + diff
         return Du, (wt, adv, diff)
 
@@ -237,8 +244,9 @@ class KFLoss:
                  band_k_hi: int = 7,
                  band_mask_kmax: int | None = None,
                  band_iso_k_lo: int | None = None,
-                 band_iso_k_hi: int | None = None):
-        self.ns = NSVorticity(re=re, t_interval=t_interval)
+                 band_iso_k_hi: int | None = None,
+                 time_order: int = 2):
+        self.ns = NSVorticity(re=re, t_interval=t_interval, time_order=time_order)
         self.lp = LpLoss(d=3, p=2, reduction="mean")
         self.data_weight = data_weight
         self.pde_weight = pde_weight
@@ -310,11 +318,8 @@ class KFLoss:
             w_t = frame_weights(w.shape[-1], self.time_weight_p,
                                 self.time_weight_alpha, w.device, w.dtype)
             data = time_weighted_rel(w, y, w_t)
-        forcing = self.ns.get_forcing(w.shape[1],
-                                      w.device).expand(w.shape[0], w.shape[1],
-                                                       w.shape[2],
-                                                       w.shape[3] - 2)
         Du, _ = self.ns.residual(w)
+        forcing = self.ns.get_forcing(w.shape[1], w.device).expand_as(Du)
         if self.pde_band_kmax is not None:
             Du = cheb_lowpass(Du, self.pde_band_kmax)
             forcing = cheb_lowpass(

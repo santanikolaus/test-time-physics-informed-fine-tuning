@@ -192,6 +192,8 @@ def run_name(cfg: DictConfig) -> str:
     decay = "-d" + "-".join(str(m) for m in cfg.lr_milestones) if cfg.lr_milestones else ""
     held = "" if cfg.heldout_split == "val" else f"-{cfg.heldout_split}"
     obs = f"-f{cfg.obs_frames}" if cfg.get("obs_frames", 0) else ""
+    obs += f"-o{cfg.pde_time_order}" if cfg.get("pde_time_order", 2) != 2 else ""
+    obs += f"-k{cfg.pde_band_kmax}" if cfg.get("pde_band_kmax") is not None else ""
     return (f"{cfg.exp}-{cfg.objective.name}{obs}-{locus.label(cfg.locus)}"
             f"-n{cfg.objective.get('pool_n', 1)}{shift}{nu}-lr{cfg.lr:.0e}-s{cfg.steps}{decay}{held}")
 
@@ -250,6 +252,8 @@ def _save_arrays(path: str, snapshots: list, losses: list, cfg: DictConfig,
         "obs_frames": cfg.get("obs_frames", 0),
         "data_weight": cfg.get("data_weight", 0.0) if cfg.get("obs_frames", 0) else 0.0,
         "monitor_n": cfg.get("monitor_n", 0),
+        "pde_time_order": cfg.get("pde_time_order", 2),
+        "pde_band_kmax": -1 if cfg.get("pde_band_kmax") is None else cfg.pde_band_kmax,
         "commit": _git_sha(),
     }
     np.savez_compressed(path, **collated, **loss_arrays,
