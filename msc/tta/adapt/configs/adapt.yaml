@@ -31,5 +31,7 @@ save_weights: false  # write the adapted state_dict so a later test read needs n
 obs_frames: 0  # observed frames 1..m per adaptation window that enter the loss (data term); 0 = label-free
 data_weight: 5.0  # weight of the observed-frame term, read only when obs_frames > 0
 monitor_n: 0  # monitoring windows: target train chains right after the pool, probed every snapshot, never in the gradient
+pde_time_order: 2  # time stencil of the adaptation residual: 2 (3-point) or 4 (5-point central difference)
+pde_band_kmax: null  # adaptation residual low-passed to Chebyshev k <= kmax; null = all wavenumbers
 save_every: null  # only read when save_weights; additionally write every N-th step.
                   # null = final step only. Set it to probe_every to keep every probed step.

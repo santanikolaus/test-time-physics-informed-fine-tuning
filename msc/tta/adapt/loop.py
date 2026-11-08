@@ -46,7 +46,9 @@ def _loss_fn(cfg) -> KFLoss:
         raise NotImplementedError(f"objective {cfg.objective.name!r} not wired yet")
     return KFLoss(re=loss_re(cfg), data_weight=0.0,
                   pde_weight=cfg.objective.pde_weight,
-                  ic_weight=cfg.objective.ic_weight)
+                  ic_weight=cfg.objective.ic_weight,
+                  time_order=cfg.get("pde_time_order", 2),
+                  pde_band_kmax=cfg.get("pde_band_kmax", None))
 
 
 def _observed_loss(loss_fn: KFLoss, pred: torch.Tensor, target: torch.Tensor, m: int) -> torch.Tensor:
