@@ -992,6 +992,17 @@ class TestTimeOrder:
         out = KFLoss(re=500, pde_weight=1.0, time_order=4, pde_band_kmax=4)(w.unsqueeze(1), w)
         assert torch.isfinite(out["pde"])
 
+    def test_edges2_keeps_ic_coupled(self):
+        """time_edges2: length T-2, 3-point values at t=1 and T-2, 5-point values in between."""
+        t = torch.arange(T, dtype=torch.float64) / (T - 1)
+        w = (t ** 4).reshape(1, 1, 1, T).expand(1, S, S, T)
+        res2, _ = NSVorticity(re=float("inf")).residual(w)
+        res4, _ = NSVorticity(re=float("inf"), time_order=4).residual(w)
+        res4e, _ = NSVorticity(re=float("inf"), time_order=4, time_edges2=True).residual(w)
+        assert res4e.shape == res2.shape
+        torch.testing.assert_close(res4e[..., [0, -1]], res2[..., [0, -1]])
+        torch.testing.assert_close(res4e[..., 1:-1], res4)
+
     def test_bad_time_order_rejected(self):
         with pytest.raises(AssertionError):
             NSVorticity(re=100, time_order=3)
