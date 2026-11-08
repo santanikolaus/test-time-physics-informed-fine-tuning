@@ -48,6 +48,7 @@ def _loss_fn(cfg) -> KFLoss:
                   pde_weight=cfg.objective.pde_weight,
                   ic_weight=cfg.objective.ic_weight,
                   time_order=cfg.get("pde_time_order", 2),
+                  time_edges2=cfg.get("pde_time_edges2", False),
                   pde_band_kmax=cfg.get("pde_band_kmax", None))
 
 
