@@ -1012,11 +1012,11 @@ class TestCausal:
 
     def test_causal_weights_gate_late_frames(self):
         """Large eps: a residual error confined to the first frame silences the later frames' contribution."""
-        du = torch.zeros(1, S, S, 6)
         f = torch.ones(1, S, S, 1)
-        du[..., 0] = 3.0
-        late = torch.zeros_like(du)
-        late[..., 0], late[..., 1:] = 3.0, 2.0
+        du = f.repeat(1, 1, 1, 6)
+        du[..., 0] += 3.0
+        late = du.clone()
+        late[..., 1:] += 2.0
         assert causal_rel(late, f, 50.0) == pytest.approx(float(causal_rel(du, f, 50.0)), rel=1e-6)
         assert causal_rel(late, f, 1e-6) > causal_rel(du, f, 1e-6)
 
