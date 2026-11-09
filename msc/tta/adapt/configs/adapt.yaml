@@ -34,5 +34,6 @@ monitor_n: 0  # monitoring windows: target train chains right after the pool, pr
 pde_time_order: 2  # time stencil of the adaptation residual: 2 (3-point) or 4 (5-point central difference)
 pde_time_edges2: false  # order 4 only: 3-point stencil at t = 1 and T-2 so the IC frame stays coupled (E14 collapse)
 pde_band_kmax: null  # adaptation residual low-passed to Chebyshev k <= kmax; null = all wavenumbers
+pde_causal_eps: null  # causal residual weighting (frame t counts once frames < t are satisfied); null = plain rel residual
 save_every: null  # only read when save_weights; additionally write every N-th step.
                   # null = final step only. Set it to probe_every to keep every probed step.

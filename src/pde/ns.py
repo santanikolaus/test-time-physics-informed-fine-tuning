@@ -231,6 +231,23 @@ def band_weighted_rel(pred: Tensor,
     return torch.sqrt(num / (den + eps)).mean()
 
 
+def causal_rel(du: Tensor, f: Tensor, eps: float) -> Tensor:
+    """Causally weighted residual (Wang et al. 2022): frame t counts once frames < t are satisfied.
+
+    Args:
+      du: (B, S, S, T') residual LHS.
+      f: forcing, broadcastable to du.
+      eps: causality strength; frame t weighted by exp(-eps * sum_{s<t} L_s), weights detached.
+
+    Returns:
+      Scalar batch mean of the weight-normalised sum_t w_t L_t / sum_t w_t, L_t = ||du_t - f||^2 / ||f||^2.
+    """
+    f = f.expand_as(du)
+    lt = ((du - f) ** 2).sum((1, 2)) / (f ** 2).sum((1, 2))
+    wt = torch.exp(-eps * (torch.cumsum(lt, -1) - lt).detach())
+    return ((wt * lt).sum(-1) / wt.sum(-1)).mean()
+
+
 class KFLoss:
 
     def __init__(self,
@@ -250,8 +267,11 @@ class KFLoss:
                  band_iso_k_lo: int | None = None,
                  band_iso_k_hi: int | None = None,
                  time_order: int = 2,
-                 time_edges2: bool = False):
+                 time_edges2: bool = False,
+                 pde_causal_eps: float | None = None):
         self.ns = NSVorticity(re=re, t_interval=t_interval, time_order=time_order, time_edges2=time_edges2)
+        assert pde_causal_eps is None or pde_causal_eps > 0, f"pde_causal_eps must be > 0, got {pde_causal_eps}"
+        self.pde_causal_eps = pde_causal_eps
         self.lp = LpLoss(d=3, p=2, reduction="mean")
         self.data_weight = data_weight
         self.pde_weight = pde_weight
@@ -330,7 +350,7 @@ class KFLoss:
             forcing = cheb_lowpass(
                 forcing,
                 self.pde_band_kmax)  # forcing is k=4 -> no-op for kmax>=4
-        pde = self.lp.rel(Du, forcing)
+        pde = self.lp.rel(Du, forcing) if self.pde_causal_eps is None else causal_rel(Du, forcing, self.pde_causal_eps)
 
         u_in = w[:, :, :, 0]  # prediction at t=0, shape (B, S, S)
         u0 = target[:, :, :, 0]  # true IC, shape (B, S, S)
