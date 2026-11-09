@@ -2,7 +2,7 @@ import pytest
 import torch
 import numpy as np
 
-from src.pde.ns import NSVorticity, KFLoss, cheb_band_mask, cheb_lowpass
+from src.pde.ns import NSVorticity, KFLoss, causal_rel, cheb_band_mask, cheb_lowpass
 
 try:
     from train_utils.losses import FDM_NS_vorticity
@@ -1006,3 +1006,23 @@ class TestTimeOrder:
     def test_bad_time_order_rejected(self):
         with pytest.raises(AssertionError):
             NSVorticity(re=100, time_order=3)
+
+
+class TestCausal:
+
+    def test_causal_weights_gate_late_frames(self):
+        """Large eps: a residual error confined to the first frame silences the later frames' contribution."""
+        f = torch.ones(1, S, S, 1)
+        du = f.repeat(1, 1, 1, 6)
+        du[..., 0] += 3.0
+        late = du.clone()
+        late[..., 1:] += 2.0
+        assert causal_rel(late, f, 50.0) == pytest.approx(float(causal_rel(du, f, 50.0)), rel=1e-6)
+        assert causal_rel(late, f, 1e-6) > causal_rel(du, f, 1e-6)
+
+    def test_kfloss_causal_runs_and_rejects_bad_eps(self):
+        w = _rand(t=12)
+        out = KFLoss(re=500, pde_weight=1.0, pde_causal_eps=1.0)(w.unsqueeze(1), w)
+        assert torch.isfinite(out["pde"])
+        with pytest.raises(AssertionError):
+            KFLoss(re=500, pde_causal_eps=0.0)
