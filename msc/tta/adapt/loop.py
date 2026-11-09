@@ -49,7 +49,8 @@ def _loss_fn(cfg) -> KFLoss:
                   ic_weight=cfg.objective.ic_weight,
                   time_order=cfg.get("pde_time_order", 2),
                   time_edges2=cfg.get("pde_time_edges2", False),
-                  pde_band_kmax=cfg.get("pde_band_kmax", None))
+                  pde_band_kmax=cfg.get("pde_band_kmax", None),
+                  pde_causal_eps=cfg.get("pde_causal_eps", None))
 
 
 def _observed_loss(loss_fn: KFLoss, pred: torch.Tensor, target: torch.Tensor, m: int) -> torch.Tensor:
