@@ -423,7 +423,7 @@ def test_adapt_runs_end_to_end_on_short_windows():
     model = _tiny_unet2d()
     before = torch.cat([p.flatten() for p in model.parameters()]).clone()
     cfg = _cfg({**OmegaConf.to_container(_adapt_cfg(steps=2, probe_every=2)),
-                "window_k": 2, "window_n": 3})
+                "window_k": 2, "window_n": 3, "window_chunk": 2})
 
     adapted, _, losses = loop.adapt(model, _FakeDataset(1, 16, 9), _FakeDataset(1, 16, 9, seed=7),
                                     _target_cfg(), Regime(op_re=100, test_re=500), cfg,

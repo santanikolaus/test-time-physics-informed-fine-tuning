@@ -4,7 +4,7 @@ import torch
 from msc.tta.adapt import window
 from src.models.kf_unet2d import Unet2DRollout
 from src.models.pdearena import Unet
-from src.pde.ns import NSVorticity
+from src.pde.ns import KFLoss, NSVorticity
 
 S, T = 16, 9
 
@@ -62,6 +62,26 @@ def test_starts_cover_both_ends_and_the_full_window_starts_at_the_ic(model):
     assert set(window.sample_windows(model, ic, T, 6, 40, g)[1].tolist()) == {0, 1, 2}
     pred, t0 = window.sample_windows(model, ic, T, T - 1, 1, g)
     assert t0.tolist() == [0] and torch.equal(pred[:, 0, ..., 0], ic)
+
+
+def test_chunked_backward_matches_the_full_batch_gradient_and_loss(model):
+    """Gradient accumulation over window chunks must be exact, else window_chunk changes the experiment."""
+    k, n = 3, 5
+    loss_fn = KFLoss(re=500, data_weight=0.0, pde_weight=1.0, ic_weight=0.0,
+                     t_interval=window.window_t_interval(1.0, T, k))
+    starts, t0 = window.sample_starts(model, torch.randn(1, S, S), T, k, n,
+                                      torch.Generator().manual_seed(0))
+    target = window.gather(torch.randn(1, S, S, T), t0, k)
+
+    def run(chunk):
+        model.zero_grad()
+        parts = window.backward_windows(model, loss_fn, starts, target, k, chunk)
+        return parts, [p.grad.clone() for p in model.parameters()]
+
+    (full, g_full), (chunked, g_chunked) = run(None), run(2)
+    # "ic" is excluded: LpLoss(d=3) on (B, S, S) also reduces over the batch; it carries weight 0 here
+    assert all(torch.allclose(full[key], chunked[key], rtol=1e-5) for key in ("loss", "pde", "data"))
+    assert all(torch.allclose(a, b, rtol=1e-4, atol=1e-7) for a, b in zip(g_full, g_chunked))
 
 
 def test_window_rejects_a_window_longer_than_the_trajectory(model):
