@@ -149,7 +149,8 @@ def test_adapt_snapshots_on_schedule_and_clones_the_model():
 
     assert [s["step"] for s in snapshots] == [0, 2, 4]
     assert len(losses) == 4
-    assert all(set(l) == {"loss", "data", "pde", "ic", "lr"} for l in losses)
+    assert all(set(l) == {"loss", "data", "pde", "ic", "lr", "grad_norm"} for l in losses)
+    assert all(l["grad_norm"] > 0 for l in losses)
     assert adapted is not model
     assert not adapted.training
     after_original = torch.cat([p.flatten() for p in model.parameters()])
@@ -196,10 +197,10 @@ def test_adapt_adds_observed_term_and_probes_monitor():
 
 
 def test_step_metrics_namespaces_loss_components():
-    step_losses = {"loss": 1.0, "data": 2.0, "pde": 3.0, "ic": 4.0, "lr": 5e-4}
+    step_losses = {"loss": 1.0, "data": 2.0, "pde": 3.0, "ic": 4.0, "lr": 5e-4, "grad_norm": 6.0}
     assert loop._step_metrics(step_losses) == {
         "train/loss": 1.0, "train/pde": 3.0, "train/ic": 4.0, "train/item_rel_l2": 2.0,
-        "train/lr": 5e-4,
+        "train/lr": 5e-4, "train/grad_norm": 6.0,
     }
 
 

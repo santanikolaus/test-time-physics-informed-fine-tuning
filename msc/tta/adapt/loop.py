@@ -126,7 +126,8 @@ def _step_metrics(step_losses: dict) -> dict:
 
     Args:
       step_losses: one step's {"loss", "data", "pde", "ic"} scalars, as
-        returned by KFLoss.__call__ after .item(), plus "lr".
+        returned by KFLoss.__call__ after .item(), plus "lr" and "grad_norm"
+        (total L2 norm of the locus gradient before the update, unclipped).
 
     Returns:
       Dict of wandb keys under the train/ namespace.
@@ -137,6 +138,7 @@ def _step_metrics(step_losses: dict) -> dict:
         "train/ic": step_losses["ic"],
         "train/item_rel_l2": step_losses["data"],
         "train/lr": step_losses["lr"],
+        "train/grad_norm": step_losses["grad_norm"],
     }
     if "obs" in step_losses:
         out["train/obs"] = step_losses["obs"]
@@ -241,7 +243,8 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
     model = copy.deepcopy(model).to(device)
     _enable_checkpointing(model)
     model.train()
-    opt = torch.optim.Adam(locus.restrict_updates(model, cfg.locus), lr=cfg.lr)
+    params = locus.restrict_updates(model, cfg.locus)
+    opt = torch.optim.Adam(params, lr=cfg.lr)
     sched = torch.optim.lr_scheduler.MultiStepLR(
         opt, milestones=list(cfg.lr_milestones), gamma=cfg.lr_gamma
     )
@@ -266,10 +269,12 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
             parts["loss"] = parts["loss"] + cfg.data_weight * parts["obs"]
         opt.zero_grad()
         parts["loss"].backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(params, float("inf"))
         opt.step()
 
         step_losses = {k: v.item() for k, v in parts.items()}
         step_losses["lr"] = opt.param_groups[0]["lr"]
+        step_losses["grad_norm"] = grad_norm.item()
         sched.step()
         losses.append(step_losses)
         log_fn(_step_metrics(step_losses), step=step)
