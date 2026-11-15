@@ -273,21 +273,23 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
         item = pool[(step - 1) % len(pool)]
         ic = item["x"].unsqueeze(0).to(device)
         target = item["y"].unsqueeze(0).to(device)
+        opt.zero_grad()
         if window_k is None:
             pred = kf_forward(
                 model, ic, target.shape[-1], time_scale=target_cfg.data.time_scale,
                 temporal_pad=target_cfg.data.temporal_pad, pad_mode=target_cfg.data.pad_mode
             )
+            parts = loss_fn(pred, target)
+            if obs_frames:
+                parts["obs"] = _observed_loss(loss_fn, pred, target, obs_frames)
+                parts["loss"] = parts["loss"] + cfg.data_weight * parts["obs"]
+            parts["loss"].backward()
         else:
-            pred, t0 = window.sample_windows(model, ic, target.shape[-1], window_k,
-                                             cfg.get("window_n", 1))
-            target = window.gather(target, t0, window_k)
-        parts = loss_fn(pred, target)
-        if obs_frames:
-            parts["obs"] = _observed_loss(loss_fn, pred, target, obs_frames)
-            parts["loss"] = parts["loss"] + cfg.data_weight * parts["obs"]
-        opt.zero_grad()
-        parts["loss"].backward()
+            starts, t0 = window.sample_starts(model, ic, target.shape[-1], window_k,
+                                              cfg.get("window_n", 1))
+            parts = window.backward_windows(model, loss_fn, starts,
+                                            window.gather(target, t0, window_k), window_k,
+                                            cfg.get("window_chunk", None))
         grad_norm = torch.nn.utils.clip_grad_norm_(params, float("inf"))
         opt.step()
 

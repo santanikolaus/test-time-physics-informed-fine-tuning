@@ -37,5 +37,6 @@ pde_band_kmax: null  # adaptation residual low-passed to Chebyshev k <= kmax; nu
 pde_causal_eps: null  # causal residual weighting (frame t counts once frames < t are satisfied); null = plain rel residual
 window_k: null  # recurrent only: residual on k-step windows re-rolled from detached own states; null = full rollout from the IC
 window_n: 1  # windows per step, from one no-grad rollout; pick n*(k-1) ~ T-2 to match full-rollout residual frames
+window_chunk: null  # windows per backward (gradient accumulation, exact); null = all window_n at once
 save_every: null  # only read when save_weights; additionally write every N-th step.
                   # null = final step only. Set it to probe_every to keep every probed step.
