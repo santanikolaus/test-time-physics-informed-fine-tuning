@@ -429,7 +429,7 @@ def test_adapt_runs_end_to_end_on_short_windows():
                                     _target_cfg(), Regime(op_re=100, test_re=500), cfg,
                                     torch.device("cpu"))
 
-    assert all(np.isfinite(l["loss"]) and l["ic"] == 0.0 for l in losses)
+    assert all(np.isfinite(l["loss"]) and l["loss"] == pytest.approx(l["pde"]) for l in losses)
     assert not torch.equal(before, torch.cat([p.flatten() for p in adapted.parameters()]))
 
 
@@ -508,8 +508,8 @@ def test_a_wrong_pde_re_never_reaches_the_eval_regime(monkeypatch):
     seen = {"loss_nu": [], "regime_nu_test": []}
     real_loss_fn = loop._loss_fn
 
-    def spy_loss_fn(cfg):
-        built = real_loss_fn(cfg)
+    def spy_loss_fn(cfg, T=None):
+        built = real_loss_fn(cfg, T)
         seen["loss_nu"].append(built.ns.v)
         return built
 
