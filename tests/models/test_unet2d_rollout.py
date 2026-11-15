@@ -49,6 +49,28 @@ def test_rollout_matches_closed_form_increment():
         assert torch.allclose(traj[..., t], expected)
 
 
+def test_grad_checkpoint_keeps_rollout_and_gradients_identical():
+    """Checkpointing may only trade memory for compute: outputs and every parameter gradient must match."""
+    torch.manual_seed(0)
+    net = Unet(n_input_scalar_components=1, n_input_vector_components=0,
+               n_output_scalar_components=1, n_output_vector_components=0,
+               time_history=1, time_future=1, hidden_channels=8, activation="gelu",
+               norm=True, padding_mode="circular")
+    model = Unet2DRollout(net, residual=True, output_factor=0.1)
+    seed = torch.randn(2, 1, 16, 16)
+
+    def run(flag):
+        model.zero_grad()
+        model.grad_checkpoint = flag
+        traj = model.rollout(seed, 6)
+        traj.square().mean().backward()
+        return traj.detach(), [p.grad.clone() for p in model.parameters()]
+
+    plain, ckpt = run(False), run(True)
+    assert torch.allclose(plain[0], ckpt[0])
+    assert all(torch.allclose(a, b, atol=1e-6) for a, b in zip(plain[1], ckpt[1]))
+
+
 def test_forward_end_to_end_with_real_unet():
     torch.manual_seed(0)
     net = Unet(
