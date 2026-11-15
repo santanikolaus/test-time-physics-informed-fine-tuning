@@ -11,7 +11,7 @@ from src.pde.ns import KFLoss
 
 from ..eval import eval as ev
 from ..eval.report import F_RMS
-from . import decide, locus, probe
+from . import decide, locus, probe, window
 
 
 BANDS = {"k1-64": slice(1, None), "k1-4": slice(1, 5), "k5-7": slice(5, 8), "k8+": slice(8, None)}
@@ -36,18 +36,30 @@ def loss_re(cfg) -> int:
     return cfg.target_re if override is None else override
 
 
-def _loss_fn(cfg) -> KFLoss:
+def _loss_fn(cfg, T: "int | None" = None) -> KFLoss:
     """Builds the adaptation loss from the objective's pde/ic weights.
 
     KFLoss's data_weight stays 0.0: its data term covers every frame, which a
     deployment never observes. Supervision on the few observed frames is added
-    separately by _observed_loss, gated by cfg.obs_frames.
+    separately by _observed_loss, gated by cfg.obs_frames. With cfg.window_k set
+    the loss scores k + 1-frame windows: their span keeps the full trajectory's
+    frame spacing and the ic term is dropped, since frame 0 is the model's own
+    state, not the IC.
+
+    Args:
+      cfg: resolved client config.
+      T: frames of a full pool trajectory; required when cfg.window_k is set.
+
+    Returns:
+      The KFLoss.
     """
     if cfg.objective.name not in WEIGHTED_OBJECTIVES:
         raise NotImplementedError(f"objective {cfg.objective.name!r} not wired yet")
+    k = cfg.get("window_k", None)
     return KFLoss(re=loss_re(cfg), data_weight=0.0,
                   pde_weight=cfg.objective.pde_weight,
-                  ic_weight=cfg.objective.ic_weight,
+                  ic_weight=cfg.objective.ic_weight if k is None else 0.0,
+                  t_interval=1.0 if k is None else window.window_t_interval(1.0, T, k),
                   time_order=cfg.get("pde_time_order", 2),
                   time_edges2=cfg.get("pde_time_edges2", False),
                   pde_band_kmax=cfg.get("pde_band_kmax", None),
@@ -240,6 +252,8 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
       per training step, "obs" present when cfg.obs_frames > 0.
     """
     obs_frames = cfg.get("obs_frames", 0)
+    window_k = cfg.get("window_k", None)
+    assert window_k is None or not obs_frames, "windowed loss has no observed-frame term"
     model = copy.deepcopy(model).to(device)
     _enable_checkpointing(model)
     model.train()
@@ -248,7 +262,7 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
     sched = torch.optim.lr_scheduler.MultiStepLR(
         opt, milestones=list(cfg.lr_milestones), gamma=cfg.lr_gamma
     )
-    loss_fn = _loss_fn(cfg)
+    loss_fn = _loss_fn(cfg, pool[0]["y"].shape[-1])
 
     snapshots = [_eval(model, pool, heldout, target_cfg, regime, device, 0, monitor)]
     _print_progress(snapshots[0])
@@ -259,10 +273,15 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
         item = pool[(step - 1) % len(pool)]
         ic = item["x"].unsqueeze(0).to(device)
         target = item["y"].unsqueeze(0).to(device)
-        pred = kf_forward(
-            model, ic, target.shape[-1], time_scale=target_cfg.data.time_scale,
-            temporal_pad=target_cfg.data.temporal_pad, pad_mode=target_cfg.data.pad_mode
-        )
+        if window_k is None:
+            pred = kf_forward(
+                model, ic, target.shape[-1], time_scale=target_cfg.data.time_scale,
+                temporal_pad=target_cfg.data.temporal_pad, pad_mode=target_cfg.data.pad_mode
+            )
+        else:
+            pred, t0 = window.sample_windows(model, ic, target.shape[-1], window_k,
+                                             cfg.get("window_n", 1))
+            target = window.gather(target, t0, window_k)
         parts = loss_fn(pred, target)
         if obs_frames:
             parts["obs"] = _observed_loss(loss_fn, pred, target, obs_frames)

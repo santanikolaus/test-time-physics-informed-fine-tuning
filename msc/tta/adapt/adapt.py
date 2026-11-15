@@ -196,6 +196,7 @@ def run_name(cfg: DictConfig) -> str:
     obs += "e" if cfg.get("pde_time_edges2", False) else ""
     obs += f"-k{cfg.pde_band_kmax}" if cfg.get("pde_band_kmax") is not None else ""
     obs += f"-c{cfg.pde_causal_eps:g}" if cfg.get("pde_causal_eps") is not None else ""
+    obs += f"-w{cfg.window_k}x{cfg.get('window_n', 1)}" if cfg.get("window_k") is not None else ""
     return (f"{cfg.exp}-{cfg.objective.name}{obs}-{locus.label(cfg.locus)}"
             f"-n{cfg.objective.get('pool_n', 1)}{shift}{nu}-lr{cfg.lr:.0e}-s{cfg.steps}{decay}{held}")
 
@@ -258,6 +259,8 @@ def _save_arrays(path: str, snapshots: list, losses: list, cfg: DictConfig,
         "pde_time_edges2": cfg.get("pde_time_edges2", False),
         "pde_band_kmax": -1 if cfg.get("pde_band_kmax") is None else cfg.pde_band_kmax,
         "pde_causal_eps": -1.0 if cfg.get("pde_causal_eps") is None else float(cfg.pde_causal_eps),
+        "window_k": -1 if cfg.get("window_k") is None else cfg.window_k,
+        "window_n": cfg.get("window_n", 1),
         "commit": _git_sha(),
     }
     np.savez_compressed(path, **collated, **loss_arrays,
