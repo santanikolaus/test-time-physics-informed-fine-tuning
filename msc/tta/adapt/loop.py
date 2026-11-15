@@ -6,6 +6,7 @@ from omegaconf import DictConfig
 
 from src.models.kf_fno import enable_gradient_checkpointing, kf_forward
 from src.models.kf_unet import DoubleConv, UNet3D
+from src.models.kf_unet2d import Unet2DRollout
 from src.pde.ns import KFLoss
 
 from ..eval import eval as ev
@@ -71,10 +72,11 @@ def _observed_loss(loss_fn: KFLoss, pred: torch.Tensor, target: torch.Tensor, m:
 def _enable_checkpointing(model: torch.nn.Module) -> None:
     """Turns on activation checkpointing for the backbone at hand, in place.
 
-    The two backbones expose it differently: the FNO has no built-in flag and gets
-    its forward loop-wrapped, while UNet3D's DoubleConv reads self.grad_checkpoint
-    at call time, so flipping it after load is enough. Both are required, not
-    optional — a 128^2 x 65 backward does not fit a 12 GB card uncheckpointed.
+    The backbones expose it differently: the FNO has no built-in flag and gets
+    its forward loop-wrapped, while UNet3D's DoubleConv and the recurrent
+    Unet2DRollout read self.grad_checkpoint at call time, so flipping it after
+    load is enough. All are required, not optional — a 128^2 x 65 backward does
+    not fit a 12 GB card uncheckpointed.
 
     Args:
       model: the adaptation clone, mutated in place.
@@ -86,6 +88,9 @@ def _enable_checkpointing(model: torch.nn.Module) -> None:
         for block in model.modules():
             if isinstance(block, DoubleConv):
                 block.grad_checkpoint = True
+        return
+    if isinstance(model, Unet2DRollout):
+        model.grad_checkpoint = True
         return
     if hasattr(model, "fno_blocks"):
         enable_gradient_checkpointing(model)

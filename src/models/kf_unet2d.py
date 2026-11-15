@@ -2,6 +2,7 @@
 
 import torch
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 
 
 class Unet2DRollout(nn.Module):
@@ -20,6 +21,11 @@ class Unet2DRollout(nn.Module):
                 predicts the next frame directly.
       output_factor: scale on the predicted increment; set to the std of the
                 one-step residual so the net regresses a unit-std target.
+
+    Attributes:
+      grad_checkpoint: when True and grad is enabled, each rollout step is
+                recomputed in backward instead of storing its activations, so
+                backprop through T steps keeps O(1) U-Net activations in T.
     """
 
     def __init__(self, net: nn.Module, residual: bool = False,
@@ -29,6 +35,7 @@ class Unet2DRollout(nn.Module):
         self.net = net
         self.residual = residual
         self.output_factor = output_factor
+        self.grad_checkpoint = False
 
     def step(self, window: torch.Tensor) -> torch.Tensor:
         """Map one input window to the next frame (residual applied if enabled).
@@ -60,8 +67,9 @@ class Unet2DRollout(nn.Module):
             return seed[:, :T].permute(0, 2, 3, 1)
         frames = [seed[:, i] for i in range(th)]
         window = seed
+        ckpt = self.grad_checkpoint and torch.is_grad_enabled()
         for _ in range(th, T):
-            nxt = self.step(window)
+            nxt = checkpoint(self.step, window, use_reentrant=False) if ckpt else self.step(window)
             frames.append(nxt)
             window = torch.cat([window[:, 1:], nxt.unsqueeze(1)], dim=1)
         return torch.stack(frames, dim=-1)

@@ -371,6 +371,36 @@ def test_enable_checkpointing_wraps_the_fno_forward():
     assert model.forward is not before
 
 
+def _tiny_unet2d() -> torch.nn.Module:
+    cfg = OmegaConf.load("configs/model/unet2d_kf.yaml")
+    cfg.hidden_channels = 8
+    torch.manual_seed(0)
+    return build_fno_kf(cfg).eval()
+
+
+def test_enable_checkpointing_flags_the_recurrent_unet_and_keeps_its_state_dict():
+    clone = copy.deepcopy(_tiny_unet2d())
+    loop._enable_checkpointing(clone)
+
+    assert clone.grad_checkpoint
+    _tiny_unet2d().load_state_dict(clone.state_dict(), strict=True)
+
+
+def test_adapt_runs_end_to_end_on_the_recurrent_unet():
+    """Full-rollout physics adaptation: full locus resolves on net.* names and KFLoss takes the rollout."""
+    model = _tiny_unet2d()
+    before = torch.cat([p.flatten() for p in model.parameters()]).clone()
+    pool, heldout = _FakeDataset(1, 16, 5), _FakeDataset(1, 16, 5, seed=7)
+
+    adapted, snapshots, losses = loop.adapt(model, pool, heldout, _target_cfg(),
+                                            Regime(op_re=100, test_re=500),
+                                            _adapt_cfg(steps=2, probe_every=2), torch.device("cpu"))
+
+    assert [s["step"] for s in snapshots] == [0, 2]
+    assert all(np.isfinite(l["loss"]) for l in losses)
+    assert not torch.equal(before, torch.cat([p.flatten() for p in adapted.parameters()]))
+
+
 def test_enable_checkpointing_rejects_an_unknown_backbone():
     with pytest.raises(NotImplementedError, match="Linear"):
         loop._enable_checkpointing(torch.nn.Linear(2, 2))
