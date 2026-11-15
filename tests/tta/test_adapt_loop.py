@@ -5,9 +5,9 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
-from msc.tta.adapt import loop
+from msc.tta.adapt import loop, window
 from msc.tta.setup import Regime
-from src.models.kf_fno import build_fno_kf
+from src.models.kf_fno import build_fno_kf, kf_forward
 from src.models.kf_unet import DoubleConv
 
 MODEL_CFG = {
@@ -399,6 +399,37 @@ def test_adapt_runs_end_to_end_on_the_recurrent_unet():
 
     assert [s["step"] for s in snapshots] == [0, 2]
     assert all(np.isfinite(l["loss"]) for l in losses)
+    assert not torch.equal(before, torch.cat([p.flatten() for p in adapted.parameters()]))
+
+
+def test_full_length_window_reproduces_the_full_rollout_loss():
+    """Ties the windowed path to the old one: k = T-1 from t0 = 0 is the full rollout, IC term already 0."""
+    model, T = _tiny_unet2d(), 5
+    ic = torch.randn(1, 16, 16)
+    target = torch.randn(1, 16, 16, T)
+    target[..., 0] = ic
+    cfg = _adapt_cfg(steps=1, probe_every=1)
+    cfg_w = _cfg({**OmegaConf.to_container(cfg), "window_k": T - 1})
+
+    with torch.no_grad():
+        full = loop._loss_fn(cfg)(kf_forward(model, ic, T, temporal_pad=0), target)
+        pred, t0 = window.sample_windows(model, ic, T, T - 1, 1)
+        win = loop._loss_fn(cfg_w, T)(pred, window.gather(target, t0, T - 1))
+
+    assert torch.allclose(full["pde"], win["pde"]) and torch.allclose(full["loss"], win["loss"])
+
+
+def test_adapt_runs_end_to_end_on_short_windows():
+    model = _tiny_unet2d()
+    before = torch.cat([p.flatten() for p in model.parameters()]).clone()
+    cfg = _cfg({**OmegaConf.to_container(_adapt_cfg(steps=2, probe_every=2)),
+                "window_k": 2, "window_n": 3})
+
+    adapted, _, losses = loop.adapt(model, _FakeDataset(1, 16, 9), _FakeDataset(1, 16, 9, seed=7),
+                                    _target_cfg(), Regime(op_re=100, test_re=500), cfg,
+                                    torch.device("cpu"))
+
+    assert all(np.isfinite(l["loss"]) and l["ic"] == 0.0 for l in losses)
     assert not torch.equal(before, torch.cat([p.flatten() for p in adapted.parameters()]))
 
 
