@@ -19,24 +19,40 @@ def window_t_interval(t_interval: float, T: int, k: int) -> float:
     return t_interval * k / (T - 1)
 
 
-def sample_window(model: Unet2DRollout, ic: torch.Tensor, T: int, k: int,
-                  generator: torch.Generator = None) -> tuple:
-    """Rolls out from ic without grad, then re-rolls k steps with grad from a detached own state.
+def gather(traj: torch.Tensor, t0: torch.Tensor, k: int) -> torch.Tensor:
+    """Cuts k + 1 frames from each start in t0 and stacks them window-major along the batch.
+
+    Args:
+      traj: (B, S, S, T) trajectory.
+      t0: (n,) start indices, each in [0, T - 1 - k].
+      k: steps per window.
+
+    Returns:
+      (n * B, S, S, k + 1); rows [i * B:(i + 1) * B] hold the window starting at t0[i].
+    """
+    return torch.cat([traj[..., t:t + k + 1] for t in t0.tolist()])
+
+
+def sample_windows(model: Unet2DRollout, ic: torch.Tensor, T: int, k: int, n: int,
+                   generator: torch.Generator = None) -> tuple:
+    """Rolls out from ic without grad, then re-rolls k steps with grad from n detached own states.
 
     Args:
       model: recurrent one-step model; only time_history 1 is supported.
       ic: (B, S, S) initial vorticity.
       T: frames of the full no-grad rollout, IC included.
-      k: grad-carrying steps, 1 <= k <= T - 1.
-      generator: CPU generator for the start index; None uses the global RNG.
+      k: grad-carrying steps per window, 1 <= k <= T - 1.
+      n: windows per call, drawn independently.
+      generator: CPU generator for the start indices; None uses the global RNG.
 
     Returns:
-      A tuple (pred, t0): pred (B, 1, S, S, k + 1) holds the detached state at frame
-      t0 followed by k predictions that carry grad; t0 is uniform in [0, T - 1 - k].
+      A tuple (pred, t0): pred (n * B, 1, S, S, k + 1), window-major as in gather(), holds
+      the detached state at each start followed by k predictions that carry grad; t0 (n,)
+      holds the starts, uniform in [0, T - 1 - k].
     """
     assert model.net.time_history == 1, "window sampling supports time_history 1 only"
     assert 1 <= k <= T - 1, f"window of {k} steps does not fit a {T}-frame trajectory"
-    t0 = int(torch.randint(0, T - k, (1,), generator=generator))
+    t0 = torch.randint(0, T - k, (n,), generator=generator)
     with torch.no_grad():
-        start = model.rollout(ic[:, None], t0 + 1)[..., t0] if t0 else ic
-    return model.rollout(start.detach()[:, None], k + 1).unsqueeze(1), t0
+        starts = gather(model.rollout(ic[:, None], T), t0, 0)
+    return model.rollout(starts.permute(0, 3, 1, 2), k + 1).unsqueeze(1), t0
