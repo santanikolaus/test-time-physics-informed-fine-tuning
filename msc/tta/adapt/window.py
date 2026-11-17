@@ -56,6 +56,22 @@ def sample_starts(model: Unet2DRollout, ic: torch.Tensor, T: int, k: int, n: int
         return gather(model.rollout(ic[:, None], T), t0, 0)[..., 0], t0
 
 
+def observed_rollout(model: Unet2DRollout, ic: torch.Tensor, m: int) -> torch.Tensor:
+    """Rolls m steps with grad from the IC, covering only the observed frames.
+
+    Args:
+      model: recurrent one-step model; only time_history 1 is supported.
+      ic: (B, S, S) initial vorticity.
+      m: observed frames after the IC, m >= 1.
+
+    Returns:
+      (B, 1, S, S, m + 1): the IC followed by m predictions that carry grad.
+    """
+    assert model.net.time_history == 1, "observed rollout supports time_history 1 only"
+    assert m >= 1, f"need at least one observed frame, got {m}"
+    return model.rollout(ic[:, None], m + 1).unsqueeze(1)
+
+
 def sample_windows(model: Unet2DRollout, ic: torch.Tensor, T: int, k: int, n: int,
                    generator: torch.Generator = None) -> tuple:
     """Re-rolls k steps with grad from n detached own states, as drawn by sample_starts.

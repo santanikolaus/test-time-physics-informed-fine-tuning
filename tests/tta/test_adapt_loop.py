@@ -433,6 +433,31 @@ def test_adapt_runs_end_to_end_on_short_windows():
     assert not torch.equal(before, torch.cat([p.flatten() for p in adapted.parameters()]))
 
 
+def test_observed_rollout_matches_the_full_rollout_on_the_observed_frames():
+    model, ic = _tiny_unet2d(), torch.randn(1, 16, 16)
+
+    with torch.no_grad():
+        short = window.observed_rollout(model, ic, 2)
+        full = kf_forward(model, ic, 5, temporal_pad=0)
+
+    assert torch.allclose(short, full[..., :3])
+
+
+def test_data_objective_trains_on_observed_frames_only():
+    model = _tiny_unet2d()
+    before = torch.cat([p.flatten() for p in model.parameters()]).clone()
+    cfg = _cfg({**OmegaConf.to_container(_adapt_cfg(steps=2, probe_every=2)),
+                "objective": {"name": "data", "pde_weight": 0.0, "ic_weight": 0.0},
+                "obs_frames": 2, "data_weight": 5.0})
+
+    adapted, _, losses = loop.adapt(model, _FakeDataset(1, 16, 5), _FakeDataset(1, 16, 5, seed=7),
+                                    _target_cfg(), Regime(op_re=100, test_re=500), cfg,
+                                    torch.device("cpu"))
+
+    assert all(l["loss"] == pytest.approx(5 * l["obs"]) and l["pde"] == 0 for l in losses)
+    assert not torch.equal(before, torch.cat([p.flatten() for p in adapted.parameters()]))
+
+
 def test_enable_checkpointing_rejects_an_unknown_backbone():
     with pytest.raises(NotImplementedError, match="Linear"):
         loop._enable_checkpointing(torch.nn.Linear(2, 2))

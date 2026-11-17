@@ -1,0 +1,4 @@
+name: data  # observed frames only (needs obs_frames > 0); no physics term, recurrent backbone
+pde_weight: 0.0
+ic_weight: 0.0
+pool_n: 5

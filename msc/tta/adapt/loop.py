@@ -18,7 +18,7 @@ BANDS = {"k1-64": slice(1, None), "k1-4": slice(1, 5), "k5-7": slice(5, 8), "k8+
 MONITOR_FRAMES = 8
 RHO_THRESH = 0.9
 W1_FRAMES = (4, 63)
-WEIGHTED_OBJECTIVES = ("physics", "pde", "ic")
+WEIGHTED_OBJECTIVES = ("physics", "pde", "ic", "data")
 
 
 def loss_re(cfg) -> int:
@@ -249,11 +249,14 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
       mode); one {"step", "pool", "heldout"[, "monitor"]} dict per scheduled
       snapshot (step 0 and cfg.steps always included, every cfg.probe_every
       steps in between); and one {"loss", "data", "pde", "ic"[, "obs"]} dict
-      per training step, "obs" present when cfg.obs_frames > 0.
+      per training step, "obs" present when cfg.obs_frames > 0. The data
+      objective rolls out only the observed frames, so its "data" is nan.
     """
     obs_frames = cfg.get("obs_frames", 0)
     window_k = cfg.get("window_k", None)
     assert window_k is None or not obs_frames, "windowed loss has no observed-frame term"
+    data_only = cfg.objective.name == "data"
+    assert not data_only or obs_frames > 0, "data objective needs obs_frames > 0"
     model = copy.deepcopy(model).to(device)
     _enable_checkpointing(model)
     model.train()
@@ -274,7 +277,14 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
         ic = item["x"].unsqueeze(0).to(device)
         target = item["y"].unsqueeze(0).to(device)
         opt.zero_grad()
-        if window_k is None:
+        if data_only:
+            obs = _observed_loss(loss_fn, window.observed_rollout(model, ic, obs_frames),
+                                 target, obs_frames)
+            zero = torch.zeros((), device=device)
+            parts = {"loss": cfg.data_weight * obs, "data": torch.full((), float("nan")),
+                     "pde": zero, "ic": zero, "obs": obs}
+            parts["loss"].backward()
+        elif window_k is None:
             pred = kf_forward(
                 model, ic, target.shape[-1], time_scale=target_cfg.data.time_scale,
                 temporal_pad=target_cfg.data.temporal_pad, pad_mode=target_cfg.data.pad_mode
