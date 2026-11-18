@@ -72,6 +72,23 @@ def observed_rollout(model: Unet2DRollout, ic: torch.Tensor, m: int) -> torch.Te
     return model.rollout(ic[:, None], m + 1).unsqueeze(1)
 
 
+def observed_pairs(model: Unet2DRollout, target: torch.Tensor, m: int) -> torch.Tensor:
+    """Predicts each observed frame 1..m in one step from the observed frame before it.
+
+    Args:
+      model: recurrent one-step model; only time_history 1 is supported.
+      target: (B, S, S, T) trajectory whose frames 0..m are observed.
+      m: observed frames after the IC, 1 <= m < T.
+
+    Returns:
+      (B, 1, S, S, m + 1): the observed IC followed by m one-step predictions that carry grad.
+    """
+    assert model.net.time_history == 1, "observed pairs support time_history 1 only"
+    assert 1 <= m < target.shape[-1], f"{m} observed frames do not fit a {target.shape[-1]}-frame trajectory"
+    steps = [model.step(target[..., t][:, None]) for t in range(m)]
+    return torch.stack([target[..., 0], *steps], dim=-1).unsqueeze(1)
+
+
 def sample_windows(model: Unet2DRollout, ic: torch.Tensor, T: int, k: int, n: int,
                    generator: torch.Generator = None) -> tuple:
     """Re-rolls k steps with grad from n detached own states, as drawn by sample_starts.

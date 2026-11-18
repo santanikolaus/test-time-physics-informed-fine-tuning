@@ -81,6 +81,25 @@ def _observed_loss(loss_fn: KFLoss, pred: torch.Tensor, target: torch.Tensor, m:
     return loss_fn.lp.rel(pred.squeeze(1)[..., 1:m + 1], target[..., 1:m + 1])
 
 
+def _observed_pred(model, ic: torch.Tensor, target: torch.Tensor, m: int, mode: str) -> torch.Tensor:
+    """Predicts the observed frames 1..m, by rollout from the IC or one step from each observed frame.
+
+    Args:
+      model: recurrent one-step model.
+      ic: (B, S, S) initial vorticity.
+      target: (B, S, S, T) trajectory whose frames 0..m are observed.
+      m: observed frames after the IC.
+      mode: "rollout" (m steps from the IC) or "pairs" (teacher-forced one-step).
+
+    Returns:
+      (B, 1, S, S, m + 1) prediction, frame 0 the IC.
+    """
+    if mode == "pairs":
+        return window.observed_pairs(model, target, m)
+    assert mode == "rollout", f"unknown obs_mode {mode!r}"
+    return window.observed_rollout(model, ic, m)
+
+
 def _enable_checkpointing(model: torch.nn.Module) -> None:
     """Turns on activation checkpointing for the backbone at hand, in place.
 
@@ -254,7 +273,7 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
     """
     obs_frames = cfg.get("obs_frames", 0)
     window_k = cfg.get("window_k", None)
-    assert window_k is None or not obs_frames, "windowed loss has no observed-frame term"
+    obs_mode = cfg.get("obs_mode", "rollout")
     data_only = cfg.objective.name == "data"
     assert not data_only or obs_frames > 0, "data objective needs obs_frames > 0"
     model = copy.deepcopy(model).to(device)
@@ -278,7 +297,7 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
         target = item["y"].unsqueeze(0).to(device)
         opt.zero_grad()
         if data_only:
-            obs = _observed_loss(loss_fn, window.observed_rollout(model, ic, obs_frames),
+            obs = _observed_loss(loss_fn, _observed_pred(model, ic, target, obs_frames, obs_mode),
                                  target, obs_frames)
             zero = torch.zeros((), device=device)
             parts = {"loss": cfg.data_weight * obs, "data": torch.full((), float("nan")),
@@ -291,7 +310,9 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
             )
             parts = loss_fn(pred, target)
             if obs_frames:
-                parts["obs"] = _observed_loss(loss_fn, pred, target, obs_frames)
+                obs_pred = pred if obs_mode == "rollout" else _observed_pred(
+                    model, ic, target, obs_frames, obs_mode)
+                parts["obs"] = _observed_loss(loss_fn, obs_pred, target, obs_frames)
                 parts["loss"] = parts["loss"] + cfg.data_weight * parts["obs"]
             parts["loss"].backward()
         else:
@@ -300,6 +321,12 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
             parts = window.backward_windows(model, loss_fn, starts,
                                             window.gather(target, t0, window_k), window_k,
                                             cfg.get("window_chunk", None))
+            if obs_frames:
+                obs = _observed_loss(loss_fn, _observed_pred(model, ic, target, obs_frames, obs_mode),
+                                     target, obs_frames)
+                (cfg.data_weight * obs).backward()
+                parts["obs"] = obs.detach()
+                parts["loss"] = parts["loss"] + cfg.data_weight * parts["obs"]
         grad_norm = torch.nn.utils.clip_grad_norm_(params, float("inf"))
         opt.step()
 
