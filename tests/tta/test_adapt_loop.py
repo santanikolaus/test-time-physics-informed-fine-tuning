@@ -443,6 +443,31 @@ def test_observed_rollout_matches_the_full_rollout_on_the_observed_frames():
     assert torch.allclose(short, full[..., :3])
 
 
+def test_observed_pairs_reproduce_the_model_own_rollout():
+    model, ic = _tiny_unet2d(), torch.randn(1, 16, 16)
+
+    with torch.no_grad():
+        own = model.rollout(ic[:, None], 5)
+        pairs = window.observed_pairs(model, own, 3)
+
+    assert torch.allclose(pairs.squeeze(1), own[..., :4], atol=1e-6)
+
+
+def test_short_windows_add_the_observed_term():
+    model = _tiny_unet2d()
+    before = torch.cat([p.flatten() for p in model.parameters()]).clone()
+    cfg = _cfg({**OmegaConf.to_container(_adapt_cfg(steps=2, probe_every=2)),
+                "window_k": 2, "window_n": 3, "window_chunk": 2,
+                "obs_frames": 2, "data_weight": 50.0, "obs_mode": "pairs"})
+
+    adapted, _, losses = loop.adapt(model, _FakeDataset(1, 16, 9), _FakeDataset(1, 16, 9, seed=7),
+                                    _target_cfg(), Regime(op_re=100, test_re=500), cfg,
+                                    torch.device("cpu"))
+
+    assert all(l["obs"] > 0 and l["loss"] == pytest.approx(l["pde"] + 50 * l["obs"]) for l in losses)
+    assert not torch.equal(before, torch.cat([p.flatten() for p in adapted.parameters()]))
+
+
 def test_data_objective_trains_on_observed_frames_only():
     model = _tiny_unet2d()
     before = torch.cat([p.flatten() for p in model.parameters()]).clone()
