@@ -51,6 +51,11 @@ def build(cfg: DictConfig, device: torch.device):
     return setup.load_model(cfg.ckpt, device)
 
 
+def target_path(cfg: DictConfig) -> str:
+    """Returns the target-Re data file: cfg.target_path when set, else the res128 file of cfg.target_re."""
+    return cfg.get("target_path") or setup.data_path_for_re(cfg.target_re)
+
+
 def build_splits(cfg: DictConfig, train_cfg: DictConfig) -> tuple:
     """Builds the adapt pool and the held-out probe set on the target-Re data.
 
@@ -75,7 +80,7 @@ def build_splits(cfg: DictConfig, train_cfg: DictConfig) -> tuple:
         raise ValueError(f"heldout_split must be one of {HELDOUT_SPLITS}, got "
                          f"{cfg.heldout_split!r} — the train split is the adapt pool")
     target_cfg = copy.deepcopy(train_cfg)
-    target_cfg.data.data_path = setup.data_path_for_re(cfg.target_re)
+    target_cfg.data.data_path = target_path(cfg)
 
     heldout = setup.build_dataset(target_cfg, cfg.heldout_split)
     pool_cfg = target_cfg
@@ -152,14 +157,14 @@ def describe(cfg: DictConfig, model: torch.nn.Module, train_cfg: DictConfig) -> 
             f"n_params    : {n_params:,}", f"device      : {next(model.parameters()).device}",
             f"source_re   : {cfg.op_re}", f"target_re   : {cfg.target_re}",
             f"pde_re      : {loop.loss_re(cfg)} (loss only; data + eval stay at Re{cfg.target_re})",
-            f"target_path : {setup.data_path_for_re(cfg.target_re)}", f"sub_t       : {data.sub_t}",
+            f"target_path : {target_path(cfg)}", f"sub_t       : {data.sub_t}",
             f"n_context   : {data.get('n_context', 1)}", f"objective   : {cfg.objective.name}",
             f"locus       : {locus.label(cfg.locus)}",
             f"movable     : {counts['effective']:,} of {n_params:,} entries "
             f"({100 * counts['effective'] / n_params:.2f}%), {counts['trainable']:,} selected",
             f"pool        : {cfg.objective.get('pool_n', 1)} samples "
             f"(train [{cfg.get('pool_offset', 0)}:{cfg.get('pool_offset', 0) + cfg.objective.get('pool_n', 1)}) "
-            f"of {cfg.get('pool_path') or setup.data_path_for_re(cfg.target_re)})",
+            f"of {cfg.get('pool_path') or target_path(cfg)})",
             f"heldout     : {setup.SPLIT[cfg.heldout_split]['n']} samples "
             f"({cfg.heldout_split} split, offset {setup.SPLIT[cfg.heldout_split]['offset']})",
             f"budget      : {cfg.steps} steps @ lr={cfg.lr}",
@@ -188,6 +193,7 @@ def run_name(cfg: DictConfig) -> str:
     """
     shift = f"-p{cfg.get('pool_offset', 0)}" if cfg.get("pool_offset", 0) else ""
     shift += f"-{Path(cfg.pool_path).stem}" if cfg.get("pool_path") else ""
+    shift += f"-{Path(cfg.target_path).stem}" if cfg.get("target_path") else ""
     nu = "" if cfg.get("pde_re", None) is None else f"-nu{loop.loss_re(cfg):g}"
     decay = "-d" + "-".join(str(m) for m in cfg.lr_milestones) if cfg.lr_milestones else ""
     held = "" if cfg.heldout_split == "val" else f"-{cfg.heldout_split}"
