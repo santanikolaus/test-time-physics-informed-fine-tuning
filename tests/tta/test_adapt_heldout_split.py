@@ -48,6 +48,21 @@ def test_pool_path_swaps_only_the_pool_file(monkeypatch):
     assert "-pool_tau2_res128-" in adapt.run_name(cfg)
 
 
+def test_target_path_swaps_pool_and_heldout_file(monkeypatch):
+    paths = {}
+    monkeypatch.setattr(adapt.setup, "data_path_for_re", lambda re: f"Re{re}.npy")
+    monkeypatch.setattr(adapt.setup, "build_dataset",
+                        lambda cfg, name: paths.setdefault(name, cfg.data.data_path) and list(range(15)))
+    cfg = _cfg("val")
+    cfg.target_path = "/data/Re500_res256.npy"
+
+    _, _, target_cfg = adapt.build_splits(cfg, _train_cfg())
+
+    assert paths == {"val": "/data/Re500_res256.npy", "train": "/data/Re500_res256.npy"}
+    assert target_cfg.data.data_path == "/data/Re500_res256.npy"
+    assert "-Re500_res256-" in adapt.run_name(cfg)
+
+
 def test_pool_path_rejects_a_coarse_operator(monkeypatch):
     monkeypatch.setattr(adapt.setup, "data_path_for_re", lambda re: f"Re{re}.npy")
     monkeypatch.setattr(adapt.setup, "build_dataset", lambda cfg, name: list(range(15)))
