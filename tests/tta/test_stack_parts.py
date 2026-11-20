@@ -1,6 +1,10 @@
 import numpy as np
 
-from src.solver.stack_parts import main, part_path
+from src.solver.stack_parts import PATTERN, main
+
+
+def part_path(parts, re, res, j):
+    return parts / PATTERN.format(re=re, res=res, j=j)
 
 
 def test_stack_preserves_chain_order_and_shape(tmp_path, monkeypatch):
