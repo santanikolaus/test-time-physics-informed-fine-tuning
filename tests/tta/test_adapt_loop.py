@@ -597,3 +597,4 @@ def test_spectrum_term_is_off_at_weight_zero_and_skips_frame_zero():
 
     parts = fn(2 * pred, target)
     assert float(parts["loss"]) == pytest.approx(float(base(2 * pred, target)["loss"]) + 0.5 * np.log(4) ** 2, rel=1e-5)
+    assert loop._with_spectrum(base, _cfg({"spec_weight": 0.5, "spec_k_hi": 4}), pool, "cpu").target_spec.shape == (5,)

@@ -88,7 +88,7 @@ def _with_spectrum(loss_fn: KFLoss, cfg, pool, device):
 
     Args:
       loss_fn: the run's KFLoss.
-      cfg: resolved client config; spec_weight (0 = off), spec_k_lo.
+      cfg: resolved client config; spec_weight (0 = off), spec_k_lo, spec_k_hi (null = S // 2).
       pool: adapt pool; items carry the IC as "x" (S, S).
       device: torch device.
 
@@ -98,9 +98,9 @@ def _with_spectrum(loss_fn: KFLoss, cfg, pool, device):
     weight = cfg.get("spec_weight", 0.0)
     if not weight:
         return loss_fn
-    ics = torch.stack([item["x"] for item in pool]).to(device)
+    ics = torch.stack([pool[i]["x"] for i in range(len(pool))]).to(device)
     kinf = cheb_shell_index(ics.shape[-1], device)
-    target = radial_energy_spectrum(ics[..., None], kinf, ics.shape[-1] // 2)
+    target = radial_energy_spectrum(ics[..., None], kinf, cfg.get("spec_k_hi", None) or ics.shape[-1] // 2)
     return SpectrumLoss(loss_fn, target, kinf, cfg.get("spec_k_lo", 1), weight)
 
 

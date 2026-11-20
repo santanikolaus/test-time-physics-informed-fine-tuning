@@ -88,3 +88,5 @@ def test_run_name_marks_the_energy_term_only_when_on():
     assert "-sp" not in adapt.run_name(cfg)
     cfg.spec_weight = 0.5
     assert "-sp0.5-" in adapt.run_name(cfg)
+    cfg.spec_k_hi = 32
+    assert "-sp0.5h32-" in adapt.run_name(cfg)
