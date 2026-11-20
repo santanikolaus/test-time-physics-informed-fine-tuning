@@ -1,13 +1,13 @@
 # @package _global_
 # Lippe recurrent U-Net (2D one-step) on Re=1000 vorticity (E24 regenerated data) — same
 # bundle+recipe as kf_unet2d_re100/re500, Re1000-calibrated residual scale (one-step
-# increment std at sub_t 2 over train parts, stack_parts --std-only).
+# increment std at sub_t 2 over the 240 stacked train chains, stack_parts).
 defaults:
   - override /model: unet2d_kf
   - override /loss: kf_data_only
 module_class: KFLitModuleOneStep
 model:
-  output_factor: 0.3753
+  output_factor: 0.3773
 data:
   data_path: /system/user/studentwork/wehofer/data/ns/NS_fine_Re1000_T128_res128_part0.npy
   n_context: 1
