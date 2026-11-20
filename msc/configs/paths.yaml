@@ -78,6 +78,7 @@ data:
     # res128 file exists. filenames relative to `ns` above.
     100: NS_fine_Re100_T128_res128_part0.npy
     500: NS_fine_Re500_T128_res128_part0.npy
+    1000: NS_fine_Re1000_T128_res128_part0.npy  # E24 regenerated (512^2 solve, crop); not ns_files.re1000
 
   ns_files:
     # correlated continuous chains; original 128² dataset
