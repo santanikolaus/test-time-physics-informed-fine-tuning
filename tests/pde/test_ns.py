@@ -1026,3 +1026,20 @@ class TestCausal:
         assert torch.isfinite(out["pde"])
         with pytest.raises(AssertionError):
             KFLoss(re=500, pde_causal_eps=0.0)
+
+
+def test_log_spectrum_loss_is_position_free_and_weighs_every_shell_equally():
+    from msc.tta.eval.eval import cheb_bins
+    from src.pde.ns import log_spectrum_loss, radial_energy_spectrum
+    g = torch.Generator().manual_seed(0)
+    w = torch.randn(2, 16, 16, 3, generator=g, dtype=torch.float64)
+    kinf = cheb_bins(16, "cpu")
+    target = radial_energy_spectrum(w, kinf, 8)
+
+    shifted = torch.roll(w, shifts=(3, 5), dims=(1, 2))
+    assert float(log_spectrum_loss(shifted, target, kinf)) < 1e-12
+    scaled = (0.5 * w).requires_grad_()
+    loss = log_spectrum_loss(scaled, target, kinf, k_lo=2)
+    assert float(loss) == pytest.approx(np.log(0.25) ** 2)
+    loss.backward()
+    assert torch.isfinite(scaled.grad).all() and scaled.grad.abs().sum() > 0

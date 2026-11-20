@@ -37,6 +37,8 @@ pde_time_order: 2  # time stencil of the adaptation residual: 2 (3-point) or 4 (
 pde_time_edges2: false  # order 4 only: 3-point stencil at t = 1 and T-2 so the IC frame stays coupled (E14 collapse)
 pde_band_kmax: null  # adaptation residual low-passed to Chebyshev k <= kmax; null = all wavenumbers
 pde_causal_eps: null  # causal residual weighting (frame t counts once frames < t are satisfied); null = plain rel residual
+spec_weight: 0.0  # energy term: weight of log_spectrum_loss vs the pool ICs' shell spectrum (position-free, every shell equal); 0 = off
+spec_k_lo: 1  # first Chebyshev shell the energy term scores
 window_k: null  # recurrent only: residual on k-step windows re-rolled from detached own states; null = full rollout from the IC
 window_n: 1  # windows per step, from one no-grad rollout; pick n*(k-1) ~ T-2 to match full-rollout residual frames
 window_chunk: null  # windows per backward (gradient accumulation, exact); null = all window_n at once

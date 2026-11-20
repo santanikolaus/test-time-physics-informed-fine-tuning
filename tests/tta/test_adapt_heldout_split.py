@@ -81,3 +81,10 @@ def test_build_splits_rejects_the_train_split_as_probe_set():
 def test_run_name_marks_the_locked_read_and_leaves_val_unmarked():
     assert adapt.run_name(_cfg("val")).endswith("-s500")
     assert adapt.run_name(_cfg("test")).endswith("-s500-test")
+
+
+def test_run_name_marks_the_energy_term_only_when_on():
+    cfg = _cfg("val")
+    assert "-sp" not in adapt.run_name(cfg)
+    cfg.spec_weight = 0.5
+    assert "-sp0.5-" in adapt.run_name(cfg)
