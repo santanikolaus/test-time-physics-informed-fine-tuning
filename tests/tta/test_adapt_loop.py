@@ -580,3 +580,21 @@ def test_a_wrong_pde_re_never_reaches_the_eval_regime(monkeypatch):
     assert seen["loss_nu"] == [pytest.approx(1.0 / 450)]
     assert seen["regime_nu_test"]
     assert all(nu == pytest.approx(1.0 / 500) for nu in seen["regime_nu_test"])
+
+
+def test_spectrum_term_is_off_at_weight_zero_and_skips_frame_zero():
+    pool = _FakeDataset(n=3, S=16, T=5)
+    base = loop._loss_fn(_cfg({"target_re": 500, "objective": {"name": "physics", "pde_weight": 1.0, "ic_weight": 0.0}}))
+    assert loop._with_spectrum(base, _cfg({"spec_weight": 0.0}), pool, "cpu") is base
+
+    fn = loop._with_spectrum(base, _cfg({"spec_weight": 0.5}), pool, "cpu")
+    ics = torch.stack([pool[i]["x"] for i in range(3)])
+    pred = torch.cat([100 * torch.randn(3, 16, 16, 1), ics[..., None].repeat(1, 1, 1, 4)], -1)[:, None]
+    target = torch.randn(3, 16, 16, 5)
+    parts = fn(pred, target)
+    assert float(parts["spec"]) < 1e-10
+    assert float(parts["loss"]) == pytest.approx(float(base(pred, target)["loss"]))
+
+    parts = fn(2 * pred, target)
+    assert float(parts["loss"]) == pytest.approx(float(base(2 * pred, target)["loss"]) + 0.5 * np.log(4) ** 2, rel=1e-5)
+    assert loop._with_spectrum(base, _cfg({"spec_weight": 0.5, "spec_k_hi": 4}), pool, "cpu").target_spec.shape == (5,)
