@@ -1,0 +1,4 @@
+ckpt=ry8uot3p op_re=100 target_re=500 spec_weight=1.0 spec_k_hi=32
+ckpt=sl3fp15e op_re=500 target_re=500 spec_weight=1.0 spec_k_hi=32
+ckpt=ry8uot3p op_re=100 target_re=100 spec_weight=1.0 spec_k_hi=32
+ckpt=ry8uot3p op_re=100 target_re=100
