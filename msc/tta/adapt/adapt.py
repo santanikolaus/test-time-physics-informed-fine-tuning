@@ -205,6 +205,9 @@ def run_name(cfg: DictConfig) -> str:
     obs += f"-k{cfg.pde_band_kmax}" if cfg.get("pde_band_kmax") is not None else ""
     obs += f"-c{cfg.pde_causal_eps:g}" if cfg.get("pde_causal_eps") is not None else ""
     obs += f"-w{cfg.window_k}x{cfg.get('window_n', 1)}" if cfg.get("window_k") is not None else ""
+    if cfg.get("spec_weight", 0.0):
+        obs += f"-sp{cfg.spec_weight:g}" + (f"k{cfg.spec_k_lo}" if cfg.get("spec_k_lo", 1) != 1 else "")
+        obs += f"h{cfg.spec_k_hi}" if cfg.get("spec_k_hi") is not None else ""
     return (f"{cfg.exp}-{cfg.objective.name}{obs}-{locus.label(cfg.locus)}"
             f"-n{cfg.objective.get('pool_n', 1)}{shift}{nu}-lr{cfg.lr:.0e}-s{cfg.steps}{decay}{held}")
 
@@ -243,6 +246,9 @@ def _save_arrays(path: str, snapshots: list, losses: list, cfg: DictConfig,
         "objective": cfg.objective.name,
         "pde_weight": cfg.objective.pde_weight,
         "ic_weight": cfg.objective.ic_weight,
+        "spec_weight": cfg.get("spec_weight", 0.0),
+        "spec_k_lo": cfg.get("spec_k_lo", 1),
+        "spec_k_hi": cfg.get("spec_k_hi") or -1,
         "locus": locus.label(cfg.locus),
         "locus_patterns": ", ".join(cfg.locus.patterns),
         "locus_layouts": ", ".join(f"{pattern}={layout}"

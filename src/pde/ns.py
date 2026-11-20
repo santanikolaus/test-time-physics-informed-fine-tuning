@@ -54,6 +54,27 @@ def spectral_alignment_loss(pred: Tensor,
     return mismatch / (target_spec.sum() + eps)
 
 
+def log_spectrum_loss(pred: Tensor, target_spec: Tensor, kinf: Tensor, k_lo: int = 1,
+                      eps: float = 1e-12) -> Tensor:
+    """Mean squared log-ratio of pred's shell energy to a target spectrum, every shell weighted equally.
+
+    Position-free (phase does not enter), and the log keeps low-energy fine shells as heavy
+    as the energetic large ones, unlike spectral_alignment_loss.
+
+    Args:
+      pred: (B, S, S, T) vorticity frames.
+      target_spec: (kmax + 1,) target energy per Chebyshev shell, as radial_energy_spectrum returns.
+      kinf: (S, S) Chebyshev shell index.
+      k_lo: first shell scored; 1 skips the mean.
+      eps: floor inside the log.
+
+    Returns:
+      Scalar; 0 when pred's batch/time-mean spectrum equals target_spec on shells k_lo..kmax.
+    """
+    spec = radial_energy_spectrum(pred, kinf, target_spec.shape[0] - 1)
+    return (torch.log(spec[k_lo:] + eps) - torch.log(target_spec[k_lo:] + eps)).pow(2).mean()
+
+
 class NSVorticity:
     """NS vorticity equation: ∂ω/∂t + u·∇ω − ν∇²ω = f(x,y).
     residual() returns the LHS; for a true solution LHS == f."""

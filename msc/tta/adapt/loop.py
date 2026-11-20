@@ -7,7 +7,7 @@ from omegaconf import DictConfig
 from src.models.kf_fno import enable_gradient_checkpointing, kf_forward
 from src.models.kf_unet import DoubleConv, UNet3D
 from src.models.kf_unet2d import Unet2DRollout
-from src.pde.ns import KFLoss
+from src.pde.ns import KFLoss, cheb_shell_index, log_spectrum_loss, radial_energy_spectrum
 
 from ..eval import eval as ev
 from ..eval.report import F_RMS
@@ -64,6 +64,44 @@ def _loss_fn(cfg, T: "int | None" = None) -> KFLoss:
                   time_edges2=cfg.get("pde_time_edges2", False),
                   pde_band_kmax=cfg.get("pde_band_kmax", None),
                   pde_causal_eps=cfg.get("pde_causal_eps", None))
+
+
+class SpectrumLoss:
+    """Adds weight * log_spectrum_loss against a fixed target spectrum to a KFLoss; frame 0 (IC or detached start) is not scored."""
+
+    def __init__(self, base: KFLoss, target_spec: torch.Tensor, kinf: torch.Tensor, k_lo: int, weight: float):
+        self.base, self.target_spec, self.kinf, self.k_lo, self.weight = base, target_spec, kinf, k_lo, weight
+        self.lp = base.lp
+
+    def __call__(self, pred: torch.Tensor, target: torch.Tensor) -> dict:
+        parts = self.base(pred, target)
+        parts["spec"] = log_spectrum_loss(pred.squeeze(1)[..., 1:], self.target_spec, self.kinf, self.k_lo)
+        parts["loss"] = parts["loss"] + self.weight * parts["spec"]
+        return parts
+
+
+def _with_spectrum(loss_fn: KFLoss, cfg, pool, device):
+    """Wraps loss_fn with the energy term when cfg.spec_weight > 0, target = shell spectrum of the pool ICs.
+
+    The ICs are the only target-regime frames a label-free run sees; KF is statistically
+    stationary, so their spectrum is the target regime's.
+
+    Args:
+      loss_fn: the run's KFLoss.
+      cfg: resolved client config; spec_weight (0 = off), spec_k_lo, spec_k_hi (null = S // 2).
+      pool: adapt pool; items carry the IC as "x" (S, S).
+      device: torch device.
+
+    Returns:
+      loss_fn unchanged at weight 0, else a SpectrumLoss.
+    """
+    weight = cfg.get("spec_weight", 0.0)
+    if not weight:
+        return loss_fn
+    ics = torch.stack([pool[i]["x"] for i in range(len(pool))]).to(device)
+    kinf = cheb_shell_index(ics.shape[-1], device)
+    target = radial_energy_spectrum(ics[..., None], kinf, cfg.get("spec_k_hi", None) or ics.shape[-1] // 2)
+    return SpectrumLoss(loss_fn, target, kinf, cfg.get("spec_k_lo", 1), weight)
 
 
 def _observed_loss(loss_fn: KFLoss, pred: torch.Tensor, target: torch.Tensor, m: int) -> torch.Tensor:
@@ -171,8 +209,9 @@ def _step_metrics(step_losses: dict) -> dict:
         "train/lr": step_losses["lr"],
         "train/grad_norm": step_losses["grad_norm"],
     }
-    if "obs" in step_losses:
-        out["train/obs"] = step_losses["obs"]
+    for key in ("obs", "spec"):
+        if key in step_losses:
+            out[f"train/{key}"] = step_losses[key]
     return out
 
 
@@ -284,7 +323,7 @@ def adapt(model, pool, heldout, target_cfg: DictConfig, regime, cfg, device,
     sched = torch.optim.lr_scheduler.MultiStepLR(
         opt, milestones=list(cfg.lr_milestones), gamma=cfg.lr_gamma
     )
-    loss_fn = _loss_fn(cfg, pool[0]["y"].shape[-1])
+    loss_fn = _with_spectrum(_loss_fn(cfg, pool[0]["y"].shape[-1]), cfg, pool, device)
 
     snapshots = [_eval(model, pool, heldout, target_cfg, regime, device, 0, monitor)]
     _print_progress(snapshots[0])
