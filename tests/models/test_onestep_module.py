@@ -65,3 +65,38 @@ def test_training_step_trains_inner_net(pde_weight):
     assert len(grads) > 0
     total_abs_grad = sum(g.abs().sum().item() for g in grads)
     assert total_abs_grad > 0.0
+
+
+class _Oracle(torch.nn.Module):
+    """Returns the exact scaled increment from its (possibly noisy) input to gt; records the input."""
+
+    def __init__(self, gt, output_factor):
+        super().__init__()
+        self.gt, self.of, self.seen = gt, output_factor, None
+
+    def forward(self, x):
+        self.seen = x[:, -1, 0].clone()
+        return ((self.gt - self.seen) / self.of)[:, None, None]
+
+
+@pytest.mark.parametrize("noise", [0.0, 0.5])
+def test_input_noise_keeps_clean_target(noise):
+    """With opt.input_noise the net sees a noisy window but must still map it to the clean next frame."""
+    cfg = _make_cfg(0.0)
+    cfg.model.residual, cfg.model.output_factor, cfg.opt.input_noise = True, 0.25, noise
+    module = KFLitModuleOneStep(cfg)
+    batch = _make_batch(T=5)
+    gt, last = batch["y"][..., 4], batch["y"][..., 3]
+    module.model.net = _Oracle(gt, 0.25)
+    rng = torch.get_rng_state()
+
+    loss = module.training_step(batch, 0)
+
+    assert loss.item() < 1e-10
+    noisy = not torch.allclose(module.model.net.seen, last)
+    assert noisy == bool(noise)
+    if not noise:
+        after = torch.get_rng_state()
+        torch.set_rng_state(rng)
+        torch.randint(0, 1, (1,))
+        assert torch.equal(after, torch.get_rng_state()), "noise 0 must draw no extra random numbers"
