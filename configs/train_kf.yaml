@@ -14,3 +14,4 @@ opt:
   milestones: [25, 50, 75, 100]
   step_size: 100
   gamma: 0.5
+  input_noise: 0.0  # one-step training: Gaussian input-window noise std (vorticity units), clean target
