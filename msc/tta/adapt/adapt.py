@@ -3,6 +3,7 @@ import copy
 from pathlib import Path
 
 import numpy as np
+import lightning as L
 import torch
 import wandb
 from hydra import compose, initialize_config_dir
@@ -197,6 +198,7 @@ def run_name(cfg: DictConfig) -> str:
     nu = "" if cfg.get("pde_re", None) is None else f"-nu{loop.loss_re(cfg):g}"
     decay = "-d" + "-".join(str(m) for m in cfg.lr_milestones) if cfg.lr_milestones else ""
     held = "" if cfg.heldout_split == "val" else f"-{cfg.heldout_split}"
+    held += f"-seed{cfg.seed}" if cfg.get("seed") is not None else ""
     obs = f"-f{cfg.obs_frames}" if cfg.get("obs_frames", 0) else ""
     obs += "p" if obs and cfg.get("obs_mode", "rollout") == "pairs" else ""
     obs += f"-dw{cfg.data_weight:g}" if obs and cfg.get("data_weight", 5.0) != 5.0 else ""
@@ -371,6 +373,8 @@ def main(overrides: list) -> None:
       overrides: hydra override tokens, e.g. ["experiment=fno"].
     """
     cfg = load_config(overrides)
+    if cfg.get("seed") is not None:
+        L.seed_everything(cfg.seed)
     run = wandb.init(name=run_name(cfg), group=cfg.exp,
                      config=OmegaConf.to_container(cfg, resolve=True),
                      **setup.wandb_tta_target(cfg.wandb_project))

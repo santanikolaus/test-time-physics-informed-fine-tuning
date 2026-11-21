@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import hydra
+import lightning as L
 from omegaconf import DictConfig, OmegaConf
 
 from src.models.kf_module import KFLitModule
@@ -12,6 +13,8 @@ from src.utils.utils import instantiate_callbacks, instantiate_loggers
 def main(cfg: DictConfig) -> None:
     # Convert struct DictConfig to non-struct so neuralop can mutate model config
     cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
+    if cfg.get("seed") is not None:
+        L.seed_everything(cfg.seed, workers=True)
 
     datamodule = KFDataModule(
         data_path=cfg.data.data_path,

@@ -90,3 +90,14 @@ def test_run_name_marks_the_energy_term_only_when_on():
     assert "-sp0.5-" in adapt.run_name(cfg)
     cfg.spec_k_hi = 32
     assert "-sp0.5h32-" in adapt.run_name(cfg)
+
+
+def test_run_name_marks_a_seed_and_unseeded_stays_unmarked():
+    cfg = _cfg("val")
+    assert "-seed" not in adapt.run_name(cfg)
+    cfg.seed = 3
+    assert adapt.run_name(cfg).endswith("-s500-seed3")
+
+
+def test_load_config_defaults_to_unseeded():
+    assert adapt.load_config(["experiment=fno"]).seed is None
