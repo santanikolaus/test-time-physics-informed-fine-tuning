@@ -8,6 +8,8 @@ defaults:
   - _self_
   - optional experiment: null
 
+seed: null  # seed_everything before data/model build; null = unseeded
+
 opt:
   learning_rate: 0.001
   weight_decay: 0.0
