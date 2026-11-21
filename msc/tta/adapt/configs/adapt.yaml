@@ -43,6 +43,7 @@ spec_k_hi: null  # last shell scored; null = S // 2. Near-cutoff shells carry mo
 window_k: null  # recurrent only: residual on k-step windows re-rolled from detached own states; null = full rollout from the IC
 window_n: 1  # windows per step, from one no-grad rollout; pick n*(k-1) ~ T-2 to match full-rollout residual frames
 window_chunk: null  # windows per backward (gradient accumulation, exact); null = all window_n at once
+seed: null  # seeds python/numpy/torch before the run; null = unseeded. Appends -seed{n} to the run name
 avg_from: null  # only read when save_weights: also save the running mean of the weights over steps avg_from..steps (avgFFFFF-SSSSS.pt)
 save_every: null  # only read when save_weights; additionally write every N-th step.
                   # null = final step only. Set it to probe_every to keep every probed step.
