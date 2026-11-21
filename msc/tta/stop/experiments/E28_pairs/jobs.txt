@@ -1,0 +1,18 @@
+ckpt=sl3fp15e op_re=500 target_re=1000 objective.pde_weight=0.0 spec_weight=1.0 spec_k_hi=32
+ckpt=sl3fp15e op_re=500 target_re=500 objective.pde_weight=0.0 spec_weight=1.0 spec_k_hi=32
+ckpt=sl3fp15e op_re=500 target_re=1000 pool_offset=10
+ckpt=sl3fp15e op_re=500 target_re=1000 pool_offset=10 spec_weight=1.0 spec_k_hi=32
+ckpt=sl3fp15e op_re=500 target_re=1000 pool_offset=20
+ckpt=sl3fp15e op_re=500 target_re=1000 pool_offset=20 spec_weight=1.0 spec_k_hi=32
+ckpt=sl3fp15e op_re=500 target_re=1000 pool_offset=30
+ckpt=sl3fp15e op_re=500 target_re=1000 pool_offset=30 spec_weight=1.0 spec_k_hi=32
+ckpt=sl3fp15e op_re=500 target_re=1000 pool_offset=40
+ckpt=sl3fp15e op_re=500 target_re=1000 pool_offset=40 spec_weight=1.0 spec_k_hi=32
+ckpt=sl3fp15e op_re=500 target_re=500 pool_offset=10 spec_weight=1.0 spec_k_hi=32
+ckpt=sl3fp15e op_re=500 target_re=500 pool_offset=20 spec_weight=1.0 spec_k_hi=32
+ckpt=sl3fp15e op_re=500 target_re=500 pool_offset=30 spec_weight=1.0 spec_k_hi=32
+ckpt=sl3fp15e op_re=500 target_re=500 pool_offset=40 spec_weight=1.0 spec_k_hi=32
+ckpt=ry8uot3p op_re=100 target_re=500 pool_offset=10 spec_weight=1.0 spec_k_hi=32
+ckpt=ry8uot3p op_re=100 target_re=500 pool_offset=20 spec_weight=1.0 spec_k_hi=32
+ckpt=ry8uot3p op_re=100 target_re=500 pool_offset=30 spec_weight=1.0 spec_k_hi=32
+ckpt=ry8uot3p op_re=100 target_re=500 pool_offset=40 spec_weight=1.0 spec_k_hi=32
