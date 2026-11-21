@@ -115,3 +115,23 @@ def test_weights_plan_states_the_policy_for_the_run_log():
     assert adapt.weights_plan(_cfg(True, None, steps=500)) == "final step (500) only"
     assert adapt.weights_plan(_cfg(True, 25, steps=500)) == \
         "final step (500) + every 25 steps"
+
+
+def test_avg_from_saves_the_mean_of_the_last_steps(tmp_path, monkeypatch):
+    """avg_from=3, steps=5: the avg file holds the mean of the weights after steps 3, 4, 5."""
+    monkeypatch.setattr(adapt.setup, "ROOT", tmp_path)
+    cfg = _cfg(save_weights=True, save_every=None, steps=5)
+    cfg.avg_from = 3
+    save_fn = adapt.make_save_fn(cfg, "fno-physics-full-n1-lr3e-04-s4", "abc123")
+    model, seen = _TinyModule(), []
+    for step in range(1, 6):
+        with torch.no_grad():
+            model.lin.weight.fill_(float(step))
+        seen.append(model.lin.weight.clone())
+        save_fn(model, step)
+
+    out_dir = _weights_dir(cfg, tmp_path)
+    avg = torch.load(out_dir / "avg00003-00005.pt", weights_only=False)["state_dict"]
+    assert torch.allclose(avg["lin.weight"], torch.stack(seen[2:]).mean(0))
+    final = torch.load(out_dir / "step00005.pt", weights_only=False)["state_dict"]
+    assert torch.equal(final["lin.weight"], seen[-1])

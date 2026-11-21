@@ -299,7 +299,7 @@ def weights_dir(cfg: DictConfig, run_name: str, run_id: str) -> Path:
     return setup.ROOT / cfg.out_dir / "weights" / f"{run_name}_{run_id}"
 
 
-def _save_weights(path: Path, model: torch.nn.Module, step: int, cfg: DictConfig,
+def _save_weights(path: Path, model: "torch.nn.Module | dict", step: int, cfg: DictConfig,
                   run_id: str) -> None:
     """Writes one step's adapted state_dict plus the metadata a replay needs.
 
@@ -311,13 +311,14 @@ def _save_weights(path: Path, model: torch.nn.Module, step: int, cfg: DictConfig
 
     Args:
       path: destination .pt path; its parent must exist.
-      model: the live adaptation clone, as handed to loop.adapt's save_fn.
+      model: the live adaptation clone, as handed to loop.adapt's save_fn, or a state_dict.
       step: optimizer step the weights are from.
       cfg: resolved client config, as returned by load_config().
       run_id: wandb run id this adaptation run logged under.
     """
+    state = model if isinstance(model, dict) else model.state_dict()
     torch.save({"state_dict": {k: v.detach().cpu() if torch.is_tensor(v) else v
-                               for k, v in model.state_dict().items()},
+                               for k, v in state.items()},
                 "step": step,
                 "base_ckpt": cfg.ckpt,
                 "run_id": run_id,
@@ -327,7 +328,7 @@ def _save_weights(path: Path, model: torch.nn.Module, step: int, cfg: DictConfig
 
 
 def make_save_fn(cfg: DictConfig, run_name: str, run_id: str):
-    """Builds loop.adapt's save_fn: the final step, plus every save_every-th one.
+    """Builds loop.adapt's save_fn: the final step, every save_every-th one, and the avg_from..steps weight mean.
 
     Args:
       cfg: resolved client config, as returned by load_config().
@@ -344,10 +345,21 @@ def make_save_fn(cfg: DictConfig, run_name: str, run_id: str):
     out_dir = weights_dir(cfg, run_name, run_id)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    avg_from, mean = cfg.get("avg_from"), {}
+
     def save_fn(model: torch.nn.Module, step: int) -> None:
         scheduled = cfg.save_every is not None and step % cfg.save_every == 0
         if step == cfg.steps or scheduled:
             _save_weights(out_dir / f"step{step:05d}.pt", model, step, cfg, run_id)
+        if avg_from is not None and step >= avg_from:
+            n = step - avg_from + 1
+            for k, v in model.state_dict().items():
+                if n == 1 or not torch.is_floating_point(v):
+                    mean[k] = v.detach().clone()
+                else:
+                    mean[k] += (v.detach() - mean[k]) / n
+            if step == cfg.steps:
+                _save_weights(out_dir / f"avg{avg_from:05d}-{step:05d}.pt", mean, step, cfg, run_id)
 
     return save_fn
 
