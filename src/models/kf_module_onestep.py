@@ -13,7 +13,8 @@ class KFLitModuleOneStep(KFLitModule):
     data loss is MSE on the unit-std normalized residual (Lippe's recipe; a
     frame-space loss would give the small increment almost no gradient and the
     net would collapse to persistence); otherwise it is relative-L2 on the
-    predicted frame. pde_weight>0 switches to a short autoregressive rollout so
+    predicted frame. opt.input_noise>0 adds Gaussian noise of that absolute std
+    (vorticity units) to the input window, target unchanged. pde_weight>0 switches to a short autoregressive rollout so
     KFLoss's finite-difference physics residual (needs >=3 frames) applies.
     Validation is inherited: the parent rolls out the full trajectory and scores
     val_l2.
@@ -32,6 +33,7 @@ class KFLitModuleOneStep(KFLitModule):
         opt_cfg = _get(config, "opt")
         self._warmup_epochs = _get(opt_cfg, "warmup_epochs", 5)
         self._eta_min = _get(opt_cfg, "eta_min", 1e-6)
+        self.input_noise = _get(opt_cfg, "input_noise", 0.0) or 0.0
 
     def training_step(self, batch, batch_idx):
         target = batch["y"].to(self.device)
@@ -55,6 +57,9 @@ class KFLitModuleOneStep(KFLitModule):
         else:
             window = target[..., s:s + th].permute(0, 3, 1, 2)
             gt_next = target[..., s + th]
+            if self.input_noise:
+                # Noise injection: the target stays the clean next frame, so the net learns to undo input error.
+                window = window + self.input_noise * torch.randn_like(window)
             if self.model.residual:
                 # Supervise the raw increment in residual space: with the residual
                 # reparam the increment is ~3% of the field, so rel-L2 on the
