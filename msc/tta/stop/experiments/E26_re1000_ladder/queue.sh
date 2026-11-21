@@ -10,7 +10,7 @@ mkdir -p $E/logs && cd $REPO
 until grep -qE "std .* (ok|differs)" $E24/stack.log 2>/dev/null; do sleep 300; done
 while read -r job; do
   [ -z "$job" ] && continue
-  grep -qF "done rc=0 $job" $E/queue.log 2>/dev/null && continue
+  cut -d" " -f3- $E/queue.log 2>/dev/null | grep -qxF "done rc=0 $job" && continue
   run=$job
   if [[ $job == *ckpt=RE1000* ]]; then
     until grep -q "training rc=" $E24/stack.log; do sleep 300; done

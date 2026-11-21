@@ -8,7 +8,7 @@ BASE="exp=e25 objective=physics obs_frames=0 save_weights=true objective.pool_n=
 mkdir -p $E/logs && cd $REPO
 while read -r job; do
   [ -z "$job" ] && continue
-  grep -qF "done rc=0 $job" $E/queue.log 2>/dev/null && continue
+  cut -d" " -f3- $E/queue.log 2>/dev/null | grep -qxF "done rc=0 $job" && continue
   name=$(echo "$job" | tr ' =.' '_::')
   echo "$(date +%F_%T) gpu$1 start $job (main $(git log --oneline -1 | cut -c1-7))" >> $E/queue.log
   CUDA_VISIBLE_DEVICES=$1 PYTHONPATH=. $PY -m msc.tta.adapt.adapt $BASE $job > $E/logs/$name.log 2>&1 < /dev/null
